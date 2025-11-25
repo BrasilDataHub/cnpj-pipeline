@@ -4,8 +4,6 @@ ETL completo dos dados públicos de CNPJ para bancos de dados relacionais.
 
 Fonte: [Dados Abertos CNPJ - Receita Federal](https://dados.gov.br/dados/conjuntos-dados/cadastro-nacional-da-pessoa-juridica---cnpj)
 
----
-
 ## Sobre
 
 Este projeto pretende facilitar o acesso, extração e estruturação dos dados públicos do CNPJ, disponibilizados
@@ -13,16 +11,12 @@ mensalmente pela Receita Federal, permitindo que desenvolvedores, analistas e pe
 em bases relacionais para fins analíticos, acadêmicos ou de integração com outros sistemas.
 O total de linhas (somando todas as tabelas) já está na casa dos 200 milhões.
 
----
-
 ## Funcionalidades
 
 - Download completo da base de dados CNPJ no site da RFB
 - Preparação e carga completa em banco de dados
 - Criação de índices para melhorar o desempenho das consultas
 - Suporte para SQLite e PostgreSQL
-
----
 
 ## Instalação
 
@@ -52,8 +46,6 @@ chmod +x scripts/run.sh
 
 Veja em [Scripts](./scripts/) todos os comandos disponíveis.
 
----
-
 ### Espaço necessário
 
 Cerca de 50GB:
@@ -66,8 +58,6 @@ Cerca de 50GB:
 💡 **Recomenda-se ter ao menos 70 GB livres** para garantir estabilidade durante a execução, especialmente em máquinas
 com armazenamento mecânico (HDD).
 
----
-
 ## Como utilizar
 
 O projeto disponibiliza comandos separados para **download** e **carga de dados**, mas também permite que essas etapas
@@ -75,8 +65,6 @@ sejam feitas em conjunto com o comando `complete`.
 
 - Use `complete` para automatizar **todo o processo** (download + carga do mês mais recente disponível).
 - Use `download` e `db load` separadamente se quiser maior controle sobre as etapas.
-
----
 
 ### `complete`
 
@@ -115,8 +103,6 @@ Este comando é utilizado internamente pelo `complete`.
 python cnpj.py download
 ```
 
----
-
 ### `db load`
 
 Realiza a carga completa dos dados `.zip` que já estejam baixados.  
@@ -141,8 +127,6 @@ carga dos dados por arquivo, criação dos índices).
 
 Veja exemplos em [logs.md](docs/logs.md).
 
----
-
 ### Outros comandos
 
 - Exemplos de uso com **todas as flags disponíveis** estão nos
@@ -160,8 +144,6 @@ Todas as **constantes globais** como diretórios, downloads simultâneos, entre 
 As definições de chaves primárias, estrangeiras e índices podem ser encontradas em `db/schema.py`.
 Edite conforme a sua necessidade.
 
----
-
 ## Benchmark de execução
 
 | Processo                     | Tempo                   |
@@ -177,8 +159,6 @@ Edite conforme a sua necessidade.
 
 > Equipamento: i5-1235U, 16GB RAM, HDD, Windows 11
 
----
-
 ## Estrutura do Banco de Dados
 
 O modelo relacional do banco de dados pode ser visualizado nos arquivos abaixo:
@@ -186,8 +166,6 @@ O modelo relacional do banco de dados pode ser visualizado nos arquivos abaixo:
 - [postgres_erd.png](assets/postgres_erd.png): visualização da estrutura relacional das tabelas.
 - [postgres_erd.pgerd](assets/postgres_erd.pgerd): arquivo do diagrama exportado pelo pgAdmin.
 - [postgres_script.sql](assets/postgres_script.sql): script SQL completo para criação do banco PostgreSQL.
-
----
 
 ## Exemplos de Consultas
 
@@ -197,8 +175,6 @@ estabelecimentos por cidade.
 
 - Exemplos para PostgreSQL: [query_postgres.md](docs/exemplos/query_postgres.md)
 - Exemplos para SQLite: [query_sqlite.md](docs/exemplos/query_sqlite.md)
-
----
 
 ## Estrutura do Projeto
 
@@ -257,15 +233,11 @@ rfb-cnpj-etl/
     - Acrescente como opção em **ENGINE_OPTIONS** no `config.py`
     - Adicione as variáveis necessárias em `config.py` (como conexão e diretórios)
 
----
-
 ## Como Contribuir
 
 Contribuições são bem-vindas. Para reportar bugs ou sugerir ideias, por favor, abra
 uma [Issue](https://github.com/brasildatahub/rfb-cnpj-etl/issues). Para enviar melhorias no código ou na documentação,
 crie um [Pull Request](https://github.com/brasildatahub/rfb-cnpj-etl/pulls).
-
----
 
 ## Licença
 
