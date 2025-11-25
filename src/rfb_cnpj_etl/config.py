@@ -6,13 +6,48 @@ Constantes e configurações do projeto.
 
 import multiprocessing
 from pathlib import Path
+import os
 
 # ---------------------------------------------------------------------------
 # DIRETÓRIOS
 # ---------------------------------------------------------------------------
 BASE_DIR = Path(__file__).resolve().parents[2]  # diretório base do projeto
 DATA_DIR = BASE_DIR / "data"  # diretório para dados (downloads e banco de dados)
-DOWNLOAD_DIR = DATA_DIR / "downloads"  # diretório onde os arquivos ZIP baixados serão armazenados
+ENV_PATH = BASE_DIR / ".env"  # arquivo .env na raiz do projeto
+
+
+def _load_env_file(env_path: Path) -> None:
+    """
+    Carrega variáveis do arquivo .env local para os casos em que não há python-dotenv.
+    Mantém valores existentes em os.environ e ignora linhas inválidas ou comentários.
+    """
+    if not env_path.exists():
+        return
+
+    for raw_line in env_path.read_text().splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('\'"')
+        os.environ.setdefault(key, value)
+
+
+_load_env_file(ENV_PATH)
+
+
+def _make_path_from_env(value: str, default: Path) -> Path:
+    """
+    Constrói um Path a partir de uma string. Se o caminho for relativo, considera BASE_DIR.
+    """
+    if not value:
+        return default
+    candidate = Path(value)
+    return candidate if candidate.is_absolute() else (BASE_DIR / candidate)
+
+
+DOWNLOAD_DIR = _make_path_from_env(os.getenv("DOWNLOAD_PATH"), DATA_DIR / "downloads")
 
 # ---------------------------------------------------------------------------
 # LINKS
@@ -39,11 +74,11 @@ QUEUE_SIZE = max(2, WORKER_THREADS * 2) - 5  # tamanho da fila (back‑pressure)
 # CONEXÃO POSTGRESQL
 # ---------------------------------------------------------------------------
 POSTGRES = {
-    "host": "localhost",
-    "port": 5432,
-    "user": "postgres",
-    "password": "sua_senha_aqui",
-    "database": "dados_cnpj"
+    "host": os.getenv("POSTGRES_HOST", "localhost"),
+    "port": int(os.getenv("POSTGRES_PORT", 5432)),
+    "user": os.getenv("POSTGRES_USER", "postgres"),
+    "password": os.getenv("POSTGRES_PASSWORD", "sua_senha_aqui"),
+    "database": os.getenv("POSTGRES_DBNAME", "dados_cnpj")
 }
 
 # ---------------------------------------------------------------------------

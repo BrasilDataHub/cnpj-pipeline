@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:17
+    restart: always
+    healthcheck:
+      test: ["CMD", "pg_isready", "-q", "-d", "${POSTGRES_DBNAME}", "-U", "${POSTGRES_USER}"]
+      retries: 3
+      timeout: 5s
+    volumes:
+      - ./docker/volumes/postgresql:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_DB=${POSTGRES_DBNAME}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    ports:
+      - '${FORWARD_DB_PORT:-5432}:5432'
+    networks:
+      - rfb-scrapper
+
+networks:
+  rfb-scrapper:
+    driver: bridge

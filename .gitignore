@@ -5,7 +5,8 @@ debug/
 *.zip
 *.db
 
-
 # Pastas internas
+docker/volumes
 data/
 system/
+.env
