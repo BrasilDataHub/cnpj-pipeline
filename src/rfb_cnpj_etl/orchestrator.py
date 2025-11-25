@@ -65,9 +65,20 @@ def run_orchestrator(
             files_dir = os.path.join(DOWNLOAD_DIR, folder)
 
         # validar dos arquivos na pasta
-        if not skip_validation and not validate_zip_files(month_year, files_dir):
-            print_log("EXECUÇÃO INTERROMPIDA. VERIFIQUE OS ARQUIVOS NO DIRETÓRIO LOCAL.", level="error")
-            raise
+        try:
+            if not skip_validation and not validate_zip_files(month_year, files_dir):
+                print_log("EXECUÇÃO INTERROMPIDA. VERIFIQUE OS ARQUIVOS NO DIRETÓRIO LOCAL.", level="error")
+                raise ValueError("Validação dos arquivos ZIP falhou.")
+        except FileNotFoundError:
+            hint = (
+                f"PASTA NÃO ENCONTRADA PARA {month_year}: {files_dir}. "
+                f"Baixe os arquivos antes de carregar: "
+                f"`python cnpj.py download --month {month_year}` "
+                f"ou use `python cnpj.py complete --month {month_year}`. "
+                f"Para outro caminho, passe --download-dir."
+            )
+            print_log(hint, level="error")
+            raise ValueError(hint)
 
         # estimar linhas totais para controlar o progresso
         estimated_lines = estimate_total_lines_from_size(files_dir)

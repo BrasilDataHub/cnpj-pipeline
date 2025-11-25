@@ -1,0 +1,38 @@
+# Repository Guidelines
+
+## Project Structure & Modules
+- `src/rfb_cnpj_etl/`: core package; CLI entry in `main.py`, orchestration in `orchestrator.py`, ETL helpers in `cnpj_data/`, DB logic in `db/`, shared utilities in `utils/`.
+- `cnpj.py`: thin wrapper that runs the CLI (`python cnpj.py ...`).
+- `data/`: local workspace for downloads and databases; treat as ephemeral and do not commit.
+- `docs/`: CLI reference and usage examples; start with `docs/cli/*` and `docs/exemplos/*`.
+- `assets/`: ERD, SQL script, and reference PDFs; no code.
+- `scripts/`: Windows batch helpers for setup and execution.
+
+## Setup, Build, and Run
+- Python 3.9+ recommended. Create a venv and install deps: `python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt`.
+- List available data months: `python cnpj.py get-availables`; latest month: `python cnpj.py get-latest`.
+- Download data: `python cnpj.py download --month MM/AAAA [--workers N --clean --download-dir PATH]`.
+- Initialize DB schema: `python cnpj.py db init --engine sqlite|postgres [--db-path PATH|--db-name NAME]`.
+- Load data into DB: `python cnpj.py db load --engine sqlite|postgres [--month MM/AAAA --download-dir PATH --skip-index --skip-validation --low-memory --parallel]`.
+- Full pipeline: `python cnpj.py complete [--month MM/AAAA --engine ...]` (downloads + load + indexes).
+- For flags and defaults, see `docs/cli/*.md` or `python cnpj.py --help`.
+
+## Coding Style & Naming
+- Python, 4-space indentation, type hints where practical.
+- Modules/functions use `snake_case`; configuration constants are `UPPER_SNAKE_CASE` (`config.py`).
+- Keep CLI messages concise and reuse `utils.logger.print_log` for consistent output.
+- Keep Portuguese naming for user-facing strings/CLI parity with existing code.
+
+## Testing Guidelines
+- No automated test suite yet; validate changes by exercising CLI flows on a small month (e.g., `--month 01/2024`) and checking logs.
+- Before pushing, confirm downloads land in `data/downloads/YYYY-MM` and loaders create/populate the target DB without errors.
+- If adding tests, colocate under a new `tests/` directory and prefer deterministic fixtures over real downloads.
+
+## Commit & PR Guidelines
+- Commit messages: short, imperative, and scoped (e.g., `Add sqlite batch patching`); conventional commits are welcome but not enforced.
+- PRs should include: summary of changes, commands run (download/load/index), any config tweaks, and links to related issues.
+- Avoid committing artifacts from `data/` or large logs; keep diffs focused on code/docs.
+
+## Security & Configuration Notes
+- Update database credentials locally; do not commit real secrets. `config.py` holds defaults—override via environment or local config without pushing credentials.
+- The pipeline is I/O and storage heavy (~50GB end-to-end); document any flags you change for low-memory or parallelism so others can reproduce.
