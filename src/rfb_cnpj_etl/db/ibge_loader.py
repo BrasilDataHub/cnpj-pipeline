@@ -2,22 +2,12 @@
 Carga das tabelas de referência IBGE (região, estado, cidade) a partir dos CSVs locais.
 """
 
-import sqlite3
 from typing import Dict, List, Optional
 
 import psycopg2
 
 from ..utils.ibge_lookup import IBGELookup
 from ..utils.logger import print_log
-
-
-def _insert_many_sqlite(conn, table: str, columns: List[str], rows: List[List]):
-    if not rows:
-        return
-    placeholders = ",".join("?" for _ in columns)
-    col_names = ",".join(f'"{c}"' for c in columns)
-    conn.executemany(f'INSERT INTO "{table}" ({col_names}) VALUES ({placeholders});', rows)
-
 
 def _insert_many_postgres(conn, table: str, columns: List[str], rows: List[List]):
     if not rows:
@@ -29,7 +19,7 @@ def _insert_many_postgres(conn, table: str, columns: List[str], rows: List[List]
     cur.close()
 
 
-def carregar_tabelas_ibge(engine: str, db_path: Optional[str] = None, postgres_config: Optional[Dict] = None):
+def carregar_tabelas_ibge(postgres_config: Optional[Dict] = None):
     """
     Popular as tabelas regiao/estado/cidade antes da carga principal.
     """
@@ -45,16 +35,9 @@ def carregar_tabelas_ibge(engine: str, db_path: Optional[str] = None, postgres_c
 
     conn = None
     try:
-        if engine == "sqlite":
-            if not db_path:
-                raise ValueError("db_path é obrigatório para engine sqlite.")
-            conn = sqlite3.connect(db_path)
-        elif engine == "postgres":
-            if not postgres_config:
-                raise ValueError("postgres_config é obrigatório para engine postgres.")
-            conn = psycopg2.connect(**postgres_config)
-        else:
-            raise ValueError(f"Engine não suportada: {engine}")
+        if not postgres_config:
+            raise ValueError("postgres_config é obrigatório para engine postgres.")
+        conn = psycopg2.connect(**postgres_config)
 
         cur = conn.cursor()
         cur.execute('DELETE FROM "cidade";')
@@ -62,17 +45,15 @@ def carregar_tabelas_ibge(engine: str, db_path: Optional[str] = None, postgres_c
         cur.execute('DELETE FROM "regiao";')
         cur.close()
 
-        insert_sql = _insert_many_sqlite if engine == "sqlite" else _insert_many_postgres
-
-        insert_sql(conn, "regiao", ["cod_regiao_ibge", "sigla_regiao", "nome_regiao"],
-                   referencias["regiao"])
-        insert_sql(conn, "estado",
-                   ["cod_estado_ibge", "sigla_uf", "nome_estado", "latitude", "longitude", "cod_regiao_ibge"],
-                   referencias["estado"])
-        insert_sql(conn, "cidade",
-                   ["cod_cidade_ibge", "nome_cidade", "latitude", "longitude", "capital", "cod_estado_ibge",
-                    "cod_municipio", "ddd", "fuso_horario"],
-                   referencias["cidade"])
+        _insert_many_postgres(conn, "regiao", ["cod_regiao_ibge", "sigla_regiao", "nome_regiao"],
+                              referencias["regiao"])
+        _insert_many_postgres(conn, "estado",
+                              ["cod_estado_ibge", "sigla_uf", "nome_estado", "latitude", "longitude", "cod_regiao_ibge"],
+                              referencias["estado"])
+        _insert_many_postgres(conn, "cidade",
+                              ["cod_cidade_ibge", "nome_cidade", "latitude", "longitude", "capital", "cod_estado_ibge",
+                               "cod_municipio", "ddd", "fuso_horario"],
+                              referencias["cidade"])
 
         conn.commit()
         print_log("TABELAS IBGE ATUALIZADAS", level="success")

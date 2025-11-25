@@ -3,7 +3,7 @@
 ## Project Structure & Modules
 - `src/rfb_cnpj_etl/`: core package; CLI entry in `main.py`, orchestration in `orchestrator.py`, ETL helpers in `cnpj_data/`, DB logic in `db/`, shared utilities in `utils/`.
 - `etl.py`: thin wrapper that runs the CLI (`python etl.py ...`).
-- `data/`: local workspace for downloads and databases; treat as ephemeral and do not commit.
+- `data/`: local workspace for downloads; treat as ephemeral and do not commit.
 - `docs/`: CLI reference and usage examples; start with `docs/cli/*` and `docs/exemplos/*`.
 - `assets/`: ERD, SQL script, and reference PDFs; no code.
 - `scripts/`: Windows batch helpers for setup and execution.
@@ -12,8 +12,8 @@
 - Python 3.9+ recommended. Create a venv and install deps: `python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt`.
 - List available data months: `python etl.py get-availables`; latest month: `python etl.py get-latest`.
 - Download data: `python etl.py download --month MM/AAAA [--workers N --clean --download-dir PATH]`.
-- Initialize DB schema: `python etl.py db init --engine sqlite|postgres [--db-path PATH|--db-name NAME]`.
-- Load data into DB: `python etl.py db load --engine sqlite|postgres [--month MM/AAAA --download-dir PATH --skip-index --skip-validation --low-memory --parallel]`.
+- Initialize DB schema: `python etl.py db init [--engine postgres --db-name NAME]`.
+- Load data into DB: `python etl.py db load [--engine postgres --month MM/AAAA --download-dir PATH --skip-index --skip-validation --low-memory --parallel]`.
 - Full pipeline: `python etl.py complete [--month MM/AAAA --engine ...]` (downloads + load + indexes).
 - For flags and defaults, see `docs/cli/*.md` or `python etl.py --help`.
 
@@ -29,7 +29,7 @@
 - If adding tests, colocate under a new `tests/` directory and prefer deterministic fixtures over real downloads.
 
 ## Commit & PR Guidelines
-- Commit messages: short, imperative, and scoped (e.g., `Add sqlite batch patching`); conventional commits are welcome but not enforced.
+- Commit messages: short, imperative, and scoped (e.g., `Adjust postgres batch patching`); conventional commits are welcome but not enforced.
 - PRs should include: summary of changes, commands run (download/load/index), any config tweaks, and links to related issues.
 - Avoid committing artifacts from `data/` or large logs; keep diffs focused on code/docs.
 

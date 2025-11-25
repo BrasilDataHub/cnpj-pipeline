@@ -16,7 +16,7 @@ O total de linhas (somando todas as tabelas) já está na casa dos 200 milhões.
 - Download completo da base de dados CNPJ no site da RFB
 - Preparação e carga completa em banco de dados
 - Criação de índices para melhorar o desempenho das consultas
-- Suporte para SQLite e PostgreSQL
+- Suporte para PostgreSQL
 
 ## Instalação
 
@@ -32,8 +32,8 @@ pip install -r requirements.txt
 
 > Requer Python 3.9 ou superior
 
-> Para o `PostgreSQL`, é necessário ter o servidor instalado e configurado. Para o **SQLite**, nenhuma instalação
-> adicional é necessária.
+> Para o `PostgreSQL`, é necessário ter o servidor instalado e configurado e definir as credenciais em variáveis
+> de ambiente ou em `config.py`.
 
 ### Instalação Simplificada
 
@@ -75,16 +75,13 @@ Executa o ciclo completo de **download + carga** para o mês mais recente dispon
 - Baixa o **mês mais recente**
 - Mantém 10 downloads simultâneos
 - Salva os arquivos no diretório do projeto em `data/downloads`
-- Cria e prepara o banco de dados **SQLite** (`data/db/dados_cnpj.db`)
+- Cria e prepara o banco de dados **PostgreSQL** configurado em `config.py`/variáveis de ambiente
 - Realiza a carga dos dados
 - Cria índices após a carga
 
 ```bash
 python etl.py complete
 ```
-
-> Para usar o **PostgreSQL** como padrão, adicione as variáveis (usuário, senha, nome do banco de dados) e altere
-> `DEFAULT_ENGINE` para "postgres" em `config.py`.
 ---
 
 ### `download`
@@ -112,7 +109,7 @@ Este comando também é usado internamente por `complete`.
 
 - Usa o **mês mais recente**
 - Verifica se todos os arquivos `.zip` estão presentes antes de iniciar
-- Banco padrão: SQLite (`data/db/dados_cnpj.db`)
+- Banco padrão: PostgreSQL (credenciais em `config.py` ou variáveis de ambiente)
 - Diretório de dados: `data/downloads/YYYY-MM`
 - Índices são criados ao final
 
@@ -174,7 +171,6 @@ as tabelas e colunas para extrair informações úteis, como buscar uma empresa 
 estabelecimentos por cidade.
 
 - Exemplos para PostgreSQL: [query_postgres.md](docs/exemplos/query_postgres.md)
-- Exemplos para SQLite: [query_sqlite.md](docs/exemplos/query_sqlite.md)
 
 ## Estrutura do Projeto
 
@@ -193,8 +189,6 @@ rfb-cnpj-etl/
 │       │   ├── __init__.py             
 │       │   ├── postgres_builder.py     # Criação do banco de dados (PostgreSQL)
 │       │   ├── postgres_loader.py      # Carregamento dos dados no banco (PostgreSQL)
-│       │   ├── sqlite_builder.py       # Criação do banco de dados (SQLite)
-│       │   ├── sqlite_loader.py        # Carregamento dos dados no banco (SQLite)
 │       │   └── schema.py               # Esquema do banco de dados (tabelas, chaves e índices)
 │       └── utils/                      # Funções utilitárias
 │           ├── __init__.py
@@ -207,12 +201,11 @@ rfb-cnpj-etl/
 │   ├── postgres_script.sql             # Script SQL para criação do banco de dados PostgreSQL
 │   ├── database_erd.pgerd              # Diagrama do banco de dados PostgreSQL
 │   └── postgres_erd.png                # Imagem do diagrama do banco de dados PostgreSQL
-├── data/                               # Diretório padrão para o banco de dados (SQLite) e downloads
+├── data/                               # Diretório padrão para downloads
 │   └── downloads/                      # Diretório padrão para downloads
 ├── docs/                               # Documentação do projeto           
 │   ├── exemplos/                       # Exemplos de consultas
-│   │   ├── query_postgres.md           # Para PostgreSQL
-│   │   └── query_sqlite.md             # Para SQLite
+│   │   └── query_postgres.md           # Para PostgreSQL
 │   ├── cli/                            # Comandos e documentação do CLI
 │   │   ├── complete.md                 # Documentação do comando 'complete'
 │   │   ├── db_load.md                  # Documentação do comando 'db load'
@@ -226,12 +219,11 @@ rfb-cnpj-etl/
 └── requirements.txt                    # Dependências do projeto
 ```
 
-- Para incluir um novo banco de dados (como MySQL):
-    - Crie o builder e o loader no diretório `db/` e
-    - Adicione a chamada para o builder e loader no `orchestrator.py` (no elif)
-    - Faça as alterações necessárias em `utils/produce_batches.py` (para paralelismo, por exemplo)
-    - Acrescente como opção em **ENGINE_OPTIONS** no `config.py`
-    - Adicione as variáveis necessárias em `config.py` (como conexão e diretórios)
+- O projeto suporta apenas PostgreSQL. Para incluir um novo banco de dados (como MySQL), seria necessário:
+    - Criar o builder e o loader no diretório `db/`;
+    - Adicionar a chamada para o builder e loader no `orchestrator.py`;
+    - Ajustar `utils/db_batch_producer.py` se houver diferenças de paralelismo;
+    - Acrescentar a nova engine em **ENGINE_OPTIONS** no `config.py` e configurar as variáveis correspondentes.
 
 ## Como Contribuir
 

@@ -61,13 +61,13 @@ CNPJ_DATA_URL = "https://arquivos.receitafederal.gov.br/dados/cnpj/dados_abertos
 # ---------------------------------------------------------------------------
 # BANCO DE DADOS
 # ---------------------------------------------------------------------------
-ENGINE_OPTIONS = ["sqlite", "postgres"]  # opções de engines de banco de dados (já implementadas)
-DEFAULT_ENGINE = "sqlite"  # engine padrão de banco de dados (por enquanto apenas SQLite)
+ENGINE_OPTIONS = ["postgres"]  # opções de engines de banco de dados
+DEFAULT_ENGINE = "postgres"  # engine padrão de banco de dados
 DEFAULT_PARALLEL = True  # paralelismo de inserção no banco de dados
 DEFAULT_LOW_MEMORY = False  # habilita o uso de memória limitada para inserção no banco
 AVG_COMPRESSED_LINE_SIZE_BYTES = 35  # 35 bytes/linha para estimar o total de linhas e calcular o progresso da carga de dados
 
-BATCH_SIZE = 250_000  # número de registros por batch ao inserir no banco (menor para o sqlite ~50_000)
+BATCH_SIZE = 250_000  # número de registros por batch ao inserir no banco
 BATCH_RATIO = {  # proporção para utilizar em tabelas específicas
     "estabelecimento": 0.4  # Ex.: 50_000 * 0.4 = 20_000 para a tabela estabelecimento
 }
@@ -84,11 +84,6 @@ POSTGRES = {
     "password": os.getenv("POSTGRES_PASSWORD", "sua_senha_aqui"),
     "database": os.getenv("POSTGRES_DBNAME", "dados_cnpj")
 }
-
-# ---------------------------------------------------------------------------
-# SQLITE
-# ---------------------------------------------------------------------------
-SQLITE_DB_PATH = DATA_DIR / "dados_cnpj.db"  # local do banco de dados
 
 # ---------------------------------------------------------------------------
 # DOWNLOADS

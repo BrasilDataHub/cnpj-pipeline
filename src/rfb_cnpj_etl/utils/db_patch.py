@@ -4,11 +4,10 @@
 Aplica correções estáticas na base de dados.
 """
 
-from ..config import DEFAULT_ENGINE
 from ..utils.logger import print_log
 
 
-def apply_static_fixes(conn, engine: str = DEFAULT_ENGINE):
+def apply_static_fixes(conn):
     """
     Aplica correções estáticas na base de dados.
 
@@ -57,54 +56,30 @@ def apply_static_fixes(conn, engine: str = DEFAULT_ENGINE):
                     ON CONFLICT (cod_pais) DO NOTHING;
                     """)
 
-        if engine == "postgres":
-            query_delete_duplicatas = """
-                                      DELETE \
-                                      FROM empresa
-                                      WHERE ctid IN (SELECT ctid \
-                                                     FROM (SELECT ctid, \
-                                                                  ROW_NUMBER() OVER (PARTITION BY cnpj_basico ORDER BY CASE \
-                                                                                                                           WHEN razao_social IS NOT NULL AND TRIM(razao_social) <> '' \
-                                                                                                                               THEN 0 \
-                                                                                                                           ELSE 1 END, ctid) as rn \
-                                                           FROM empresa) t \
-                                                     WHERE t.rn > 1); \
-                                      """
-            cur.execute(query_delete_duplicatas)
-
-        else:  # sqlite
-            query_delete_duplicatas_sqlite = """
-                                             DELETE \
-                                             FROM empresa
-                                             WHERE rowid IN (SELECT rowid \
-                                                             FROM (SELECT rowid, \
-                                                                          ROW_NUMBER() OVER (PARTITION BY cnpj_basico ORDER BY CASE \
-                                                                                                                                   WHEN razao_social IS NOT NULL AND TRIM(razao_social) <> '' \
-                                                                                                                                       THEN 0 \
-                                                                                                                                   ELSE 1 END, rowid) as rn \
-                                                                   FROM empresa) t \
-                                                             WHERE t.rn > 1); \
-                                             """
-            cur.execute(query_delete_duplicatas_sqlite)
+        query_delete_duplicatas = """
+                                  DELETE \
+                                  FROM empresa
+                                  WHERE ctid IN (SELECT ctid \
+                                                 FROM (SELECT ctid, \
+                                                              ROW_NUMBER() OVER (PARTITION BY cnpj_basico ORDER BY CASE \
+                                                                                                                       WHEN razao_social IS NOT NULL AND TRIM(razao_social) <> '' \
+                                                                                                                           THEN 0 \
+                                                                                                                       ELSE 1 END, ctid) as rn \
+                                                       FROM empresa) t \
+                                                 WHERE t.rn > 1); \
+                                  """
+        cur.execute(query_delete_duplicatas)
 
         cur.execute("UPDATE estabelecimento SET cod_pais = NULL WHERE cod_pais = '0';")
 
         cur.execute("UPDATE empresa SET cod_porte = '00' WHERE cod_porte = '';")
 
-        if engine == "postgres":
-            cur.execute("""
-                        UPDATE estabelecimento
-                        SET cod_pais = LPAD(cod_pais, 3, '0')
-                        WHERE cod_pais IS NOT NULL
-                          AND LENGTH(TRIM(cod_pais)) = 2;
-                        """)
-        else:  # sqlite
-            cur.execute("""
-                        UPDATE estabelecimento
-                        SET cod_pais = substr('000' || cod_pais, -3)
-                        WHERE cod_pais IS NOT NULL
-                          AND LENGTH(TRIM(cod_pais)) = 2;
-                        """)
+        cur.execute("""
+                    UPDATE estabelecimento
+                    SET cod_pais = LPAD(cod_pais, 3, '0')
+                    WHERE cod_pais IS NOT NULL
+                      AND LENGTH(TRIM(cod_pais)) = 2;
+                    """)
 
         cur.execute("""
                     DELETE

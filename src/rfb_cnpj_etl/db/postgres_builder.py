@@ -133,7 +133,7 @@ class PostgresBuilder:
         """
         if self.conn is None: self.conn = self._connect()
         # A ordem original é restaurada: primeiro o patch, depois as PKs restantes.
-        apply_static_fixes(self.conn, engine="postgres")
+        apply_static_fixes(self.conn)
         self._add_primary_keys()
 
     def enable_foreign_keys(self):

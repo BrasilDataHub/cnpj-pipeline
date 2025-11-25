@@ -7,7 +7,7 @@ Orquestração da carga de dados
 import os
 from typing import Optional
 from .cnpj_data import CNPJDataScraper
-from .db import SQLiteBuilder, run_sqlite_loader, PostgresBuilder, run_postgres_loader, carregar_tabelas_ibge
+from .db import PostgresBuilder, run_postgres_loader, carregar_tabelas_ibge
 from .utils.logger import print_log
 from .utils.zip_metadata import validate_zip_files, estimate_total_lines_from_size
 from .config import (
@@ -15,7 +15,6 @@ from .config import (
     DEFAULT_PARALLEL,
     DEFAULT_LOW_MEMORY,
     DOWNLOAD_DIR,
-    SQLITE_DB_PATH,
     POSTGRES
 )
 
@@ -23,7 +22,6 @@ from .config import (
 def run_orchestrator(
         command: Optional[str] = "load",
         engine: Optional[str] = DEFAULT_ENGINE,
-        db_path: Optional[str] = SQLITE_DB_PATH,
         db_name: Optional[str] = POSTGRES["database"],
         month_year: Optional[str] = None,
         files_dir: Optional[str] = None,
@@ -37,8 +35,7 @@ def run_orchestrator(
 
     :params:
         command: comando a ser executado ("load" ou "indexes").
-        engine: engine do banco de dados ("sqlite" ou "postgres").
-        db_path: caminho para o banco de dados SQLite.
+        engine: engine do banco de dados (apenas "postgres").
         db_name: nome do banco de dados Postgres.
         month_year: mês e ano a ser carregado ("MM/AAAA").
         files_dir: diretório com os arquivos CSV.
@@ -84,10 +81,7 @@ def run_orchestrator(
         estimated_lines = estimate_total_lines_from_size(files_dir)
 
     # instanciar o builder adequado
-    if engine == "sqlite":
-        builder = SQLiteBuilder(db_path=db_path)
-
-    elif engine == "postgres":
+    if engine == "postgres":
         postgres_config = POSTGRES.copy()
         if db_name and db_name != POSTGRES["database"]:
             postgres_config["database"] = db_name
@@ -99,32 +93,17 @@ def run_orchestrator(
     # inicializa o script_sql se for init ou load
     if command in ("init", "load"):
         builder.initialize_schema()
-        carregar_tabelas_ibge(
-            engine=engine,
-            db_path=db_path if engine == "sqlite" else None,
-            postgres_config=postgres_config if engine == "postgres" else None
-        )
+        carregar_tabelas_ibge(postgres_config=postgres_config)
 
     # carrega os dados (somente no comando load)
     if command == "load":
-        if engine == "sqlite":
-            run_sqlite_loader(
-                files_dir=files_dir,
-                db_path=db_path,
-                total_records=estimated_lines,
-                low_memory=low_memory
-            )
-        elif engine == "postgres":
-
-            run_postgres_loader(
-                files_dir=files_dir,
-                postgres_config=postgres_config,
-                total_records=estimated_lines,
-                parallel=parallel,
-                low_memory=low_memory
-            )
-        else:
-            raise ValueError(f"ENGINE NÃO SUPORTADA: {engine}")
+        run_postgres_loader(
+            files_dir=files_dir,
+            postgres_config=postgres_config,
+            total_records=estimated_lines,
+            parallel=parallel,
+            low_memory=low_memory
+        )
 
     if command == 'load':
         builder.patch_data()

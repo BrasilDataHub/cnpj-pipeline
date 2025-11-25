@@ -13,18 +13,6 @@ from .ibge_lookup import IBGELookup
 IBGE_LOOKUP = IBGELookup()
 
 
-def sanitize_for_sqlite(rows: List[List[Any]]) -> List[List[Any]]:
-    """Remove o byte nulo e apara espaços em branco."""
-    cleaned_rows = []
-    for row in rows:
-        new_row = [
-            val.replace('\x00', '').strip() if isinstance(val, str) else val
-            for val in row
-        ]
-        cleaned_rows.append(new_row)
-    return cleaned_rows
-
-
 def sanitize_for_postgres(rows: List[List[Any]]) -> List[List[Any]]:
     """Sanitiza para bancos de dados com encoding 'windows-1252'."""
     cleaned_rows = []

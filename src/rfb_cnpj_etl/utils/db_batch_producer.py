@@ -12,7 +12,7 @@ from threading import Thread
 from .logger import print_log
 from ..db.schema import SCHEMA
 from ..config import BATCH_SIZE, BATCH_RATIO
-from ..utils.db_transformers import transform_batch, sanitize_for_sqlite, sanitize_for_postgres
+from ..utils.db_transformers import transform_batch, sanitize_for_postgres
 
 
 def get_targets_from_zip_name(zip_name: str) -> List[Dict]:
@@ -122,19 +122,13 @@ def _process_zip_file(zip_file: Path, insertion_queue: Queue,
             gc.collect()
 
 
-def produce_batches(files_dir: str, insertion_queue: Queue, engine: str, num_workers: Optional[int] = None,
-                    parallel: bool = False, low_memory: bool = False,
-                    ):
+def produce_batches(files_dir: str, insertion_queue: Queue, num_workers: Optional[int] = None,
+                    parallel: bool = False, low_memory: bool = False):
     zip_files = sorted(Path(files_dir).glob("*.zip"))
 
-    if engine == "sqlite":
-        sanitizer = sanitize_for_sqlite
-    elif engine == "postgres":
-        sanitizer = sanitize_for_postgres
-    else:
-        raise ValueError(f"Engine '{engine}' não é suportado.")
+    sanitizer = sanitize_for_postgres
 
-    if parallel and engine == "postgres":
+    if parallel:
         # Usar um número limitado de threads de produção (máximo 4)
         # para evitar contenção excessiva de I/O e na fila
         max_producer_threads = min(4, len(zip_files))
@@ -165,8 +159,4 @@ def produce_batches(files_dir: str, insertion_queue: Queue, engine: str, num_wor
         for zip_file in zip_files:
             _process_zip_file(zip_file, insertion_queue, sanitizer, low_memory)
 
-    if engine == "sqlite":
-        insertion_queue.put(None)
-    elif engine == "postgres":
-        for _ in range(num_workers or 1):
-            insertion_queue.put(None)
+    # sentinelas são inseridas pelo consumidor chamador

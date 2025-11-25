@@ -118,7 +118,6 @@ def run_postgres_loader(files_dir: str, postgres_config: dict, total_records: in
         produce_batches(
             files_dir=files_dir,
             insertion_queue=insertion_queue,
-            engine="postgres",
             num_workers=num_threads,
             parallel=parallel,
             low_memory=low_memory

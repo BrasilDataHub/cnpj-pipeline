@@ -27,13 +27,13 @@ chmod +x scripts/run.sh
 
 ### Configure o Ambiente
 
-**Usando SQLite (padrão):**
+Execute o setup padrão (PostgreSQL local ou já configurado):
 
 ```bash
 ./scripts/run.sh setup
 ```
 
-**Usando PostgreSQL via Docker:**
+Para subir um PostgreSQL via Docker junto com o setup:
 
 ```bash
 ./scripts/run.sh setup --docker
@@ -114,7 +114,7 @@ Execute o script a partir da raiz do projeto passando o comando desejado:
 
 ## Exemplos de Uso
 
-### Fluxo com SQLite (padrão)
+### Fluxo padrão (PostgreSQL já configurado)
 
 ```bash
 # Configurar o ambiente

@@ -42,7 +42,7 @@ show_help() {
     echo "Exemplos:"
     echo "  ./scripts/run.sh setup             # Configurar o ambiente pela primeira vez"
     echo "  ./scripts/run.sh setup --docker    # Configurar ambiente e iniciar PostgreSQL via Docker"
-    echo "  ./scripts/run.sh complete          # Executar pipeline completo (SQLite)"
+    echo "  ./scripts/run.sh complete          # Executar pipeline completo (PostgreSQL configurado)"
     echo "  ./scripts/run.sh complete --docker # Executar pipeline completo (PostgreSQL via Docker)"
     echo ""
 }
