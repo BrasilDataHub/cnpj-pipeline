@@ -41,8 +41,8 @@ Clone o projeto, crie o ambiente virtual e instale os requisitos com:
 ```bash
 git clone https://github.com/msantosjader/rfb-cnpj-etl.git
 cd rfb-cnpj-etl
-python -m venv .venv
-.venv\Scripts\activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
@@ -51,11 +51,11 @@ pip install -r requirements.txt
 > Para o `PostgreSQL`, é necessário ter o servidor instalado e configurado. Para o **SQLite**, nenhuma instalação
 > adicional é necessária.
 
-### Instalação Simplificada (Usuários Windows)
+### Instalação Simplificada
 
-Se você está em um ambiente **Windows** e prefere **não usar o terminal ou Git**, há uma alternativa mais simples:
+Se você prefere não executar os comandos manualmente, há scripts de automação disponíveis:
 
-- Veja em [Scripts](./scripts/) como preparar e executar tudo de forma simples usando arquivos `.bat`.
+- Veja em [Scripts](./scripts/) como preparar e executar tudo de forma simples usando os arquivos `.sh`.
 
 ---
 
@@ -247,11 +247,11 @@ rfb-cnpj-etl/
 │   │   ├── db_load.md                  # Documentação do comando 'db load'
 │   │   └── download.md                 # Documentação do comando 'download'
 │   └── normalizacao.md                 # Ajustes realizados nos dados carregados
-├── scripts/                            # Automação dos processos (Windows)      
-│   ├── 001_preparar_ambiente.bat       # Cria o ambiente virtual e instala as dependências
-│   ├── 002.0_instalar_python.bat       # Executar ambos download e carga de dados
-│   ├── 002.1_run_download.bat          # Executar apenas o download
-│   └── 002.2_run_load.bat              # Executar apenas a carga de dados
+├── scripts/                            # Automação dos processos (macOS/Linux)      
+│   ├── 000_preparar_ambiente.sh        # Cria o ambiente virtual e instala as dependências
+│   ├── run_complete.sh                 # Executa download e carga de dados
+│   ├── run_download.sh                 # Executa apenas o download
+│   └── run_load.sh                     # Executa apenas a carga de dados
 ├── .gitignore
 ├── LICENSE
 ├── README.md
