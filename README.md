@@ -1,9 +1,5 @@
 # rfb-cnpj-etl
 
-[![Status](https://img.shields.io/badge/status-ativo-brightgreen)](https://github.com/brasildatahub/rfb-cnpj-etl)
-[![Python](https://img.shields.io/badge/python-3.9+-green)](...)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](../../rfb-cnpj-etl/LICENSE)
-
 ETL completo dos dados públicos de CNPJ para bancos de dados relacionais.
 
 Fonte: [Dados Abertos CNPJ - Receita Federal](https://dados.gov.br/dados/conjuntos-dados/cadastro-nacional-da-pessoa-juridica---cnpj)
@@ -16,12 +12,6 @@ Este projeto pretende facilitar o acesso, extração e estruturação dos dados 
 mensalmente pela Receita Federal, permitindo que desenvolvedores, analistas e pesquisadores utilizem essas informações
 em bases relacionais para fins analíticos, acadêmicos ou de integração com outros sistemas.
 O total de linhas (somando todas as tabelas) já está na casa dos 200 milhões.
-
-É um trabalho prático de estudos em Python e Dados, acelerado com o apoio de ferramentas de IA (LLMs). Como um
-desenvolvedor iniciante, feedbacks, sugestões e críticas construtivas são especialmente bem-vindos para meu aprendizado.
-
-> Para manter os dados sempre atualizados, o processo de download e carga de dados deve ser executado novamente a cada
-> nova publicação mensal.
 
 ---
 
