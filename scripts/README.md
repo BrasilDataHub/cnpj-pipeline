@@ -13,7 +13,7 @@ Compatível com **macOS** e **Linux (Debian/Ubuntu)**.
 Clone o repositório ou baixe o `.zip` da página de Releases:
 
 ```bash
-git clone https://github.com/msantosjader/rfb-cnpj-etl.git
+git clone https://github.com/brasildatahub/rfb-cnpj-etl.git
 cd rfb-cnpj-etl
 ```
 

@@ -1,6 +1,6 @@
 # rfb-cnpj-etl
 
-[![Status](https://img.shields.io/badge/status-ativo-brightgreen)](https://github.com/msantosjader/rfb-cnpj-etl)
+[![Status](https://img.shields.io/badge/status-ativo-brightgreen)](https://github.com/brasildatahub/rfb-cnpj-etl)
 [![Python](https://img.shields.io/badge/python-3.9+-green)](...)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](../../rfb-cnpj-etl/LICENSE)
 
@@ -39,7 +39,7 @@ desenvolvedor iniciante, feedbacks, sugestões e críticas construtivas são esp
 Clone o projeto, crie o ambiente virtual e instale os requisitos com:
 
 ```bash
-git clone https://github.com/msantosjader/rfb-cnpj-etl.git
+git clone https://github.com/brasildatahub/rfb-cnpj-etl.git
 cd rfb-cnpj-etl
 python3 -m venv .venv
 source .venv/bin/activate
@@ -272,8 +272,8 @@ rfb-cnpj-etl/
 ## Como Contribuir
 
 Contribuições são bem-vindas. Para reportar bugs ou sugerir ideias, por favor, abra
-uma [Issue](https://github.com/msantosjader/rfb-cnpj-etl/issues). Para enviar melhorias no código ou na documentação,
-crie um [Pull Request](https://github.com/msantosjader/rfb-cnpj-etl/pulls).
+uma [Issue](https://github.com/brasildatahub/rfb-cnpj-etl/issues). Para enviar melhorias no código ou na documentação,
+crie um [Pull Request](https://github.com/brasildatahub/rfb-cnpj-etl/pulls).
 
 ---
 
