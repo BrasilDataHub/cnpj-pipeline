@@ -68,7 +68,7 @@ BATCH_RATIO = {  # proporção para utilizar em tabelas específicas
     "estabelecimento": 0.4  # Ex.: 50_000 * 0.4 = 20_000 para a tabela estabelecimento
 }
 WORKER_THREADS = max(1, multiprocessing.cpu_count() - 1)  # quantidade de threads de worker para pipeline de inserção
-QUEUE_SIZE = max(2, WORKER_THREADS * 2) - 5  # tamanho da fila (back‑pressure) no pipeline inserção
+QUEUE_SIZE = max(4, WORKER_THREADS * 2)  # tamanho da fila (back‑pressure) no pipeline inserção
 
 # ---------------------------------------------------------------------------
 # CONEXÃO POSTGRESQL

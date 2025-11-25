@@ -130,9 +130,27 @@ def produce_batches(files_dir: str, insertion_queue: Queue, engine: str, num_wor
         raise ValueError(f"Engine '{engine}' não é suportado.")
 
     if parallel and engine == "postgres":
-        threads = []
+        # Usar um número limitado de threads de produção (máximo 4)
+        # para evitar contenção excessiva de I/O e na fila
+        max_producer_threads = min(4, len(zip_files))
+
+        # Fila de arquivos a processar
+        file_queue: Queue = Queue()
         for zip_file in zip_files:
-            t = Thread(target=_process_zip_file, args=(zip_file, insertion_queue, sanitizer, low_memory))
+            file_queue.put(zip_file)
+
+        def producer_worker():
+            while True:
+                try:
+                    zip_file = file_queue.get_nowait()
+                except:
+                    break
+                _process_zip_file(zip_file, insertion_queue, sanitizer, low_memory)
+                file_queue.task_done()
+
+        threads = []
+        for _ in range(max_producer_threads):
+            t = Thread(target=producer_worker)
             t.start()
             threads.append(t)
 
