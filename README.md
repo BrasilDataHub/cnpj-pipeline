@@ -53,9 +53,14 @@ pip install -r requirements.txt
 
 ### Instalação Simplificada
 
-Se você prefere não executar os comandos manualmente, há scripts de automação disponíveis:
+Se você prefere não executar os comandos manualmente, use o script de automação:
 
-- Veja em [Scripts](./scripts/) como preparar e executar tudo de forma simples usando os arquivos `.sh`.
+```bash
+chmod +x scripts/run.sh
+./scripts/run.sh setup
+```
+
+Veja em [Scripts](./scripts/) todos os comandos disponíveis.
 
 ---
 
@@ -248,10 +253,7 @@ rfb-cnpj-etl/
 │   │   └── download.md                 # Documentação do comando 'download'
 │   └── normalizacao.md                 # Ajustes realizados nos dados carregados
 ├── scripts/                            # Automação dos processos (macOS/Linux)      
-│   ├── 000_preparar_ambiente.sh        # Cria o ambiente virtual e instala as dependências
-│   ├── run_complete.sh                 # Executa download e carga de dados
-│   ├── run_download.sh                 # Executa apenas o download
-│   └── run_load.sh                     # Executa apenas a carga de dados
+│   └── run.sh                          # Script unificado (setup, complete, download, load)
 ├── .gitignore
 ├── LICENSE
 ├── README.md

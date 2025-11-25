@@ -1,6 +1,6 @@
 # Scripts de Automação
 
-Este diretório contém scripts para automatizar tarefas comuns do projeto, como a instalação de dependências e a execução do processo de ETL.
+Este diretório contém o script `run.sh` para automatizar tarefas comuns do projeto, como a instalação de dependências e a execução do processo de ETL.
 
 Compatível com **macOS** e **Linux (Debian/Ubuntu)**.
 
@@ -17,23 +17,52 @@ git clone https://github.com/msantosjader/rfb-cnpj-etl.git
 cd rfb-cnpj-etl
 ```
 
-### Dê Permissão de Execução aos Scripts
+### Dê Permissão de Execução ao Script
 
-Antes de executar, torne os scripts executáveis:
+Antes de executar, torne o script executável:
 
 ```bash
-chmod +x scripts/*.sh
+chmod +x scripts/run.sh
 ```
 
-### Execute a Instalação do Ambiente
+### Configure o Ambiente
+
+**Usando SQLite (padrão):**
 
 ```bash
-./scripts/000_preparar_ambiente.sh
+./scripts/run.sh setup
+```
+
+**Usando PostgreSQL via Docker:**
+
+```bash
+./scripts/run.sh setup --docker
 ```
 
 Aguarde a mensagem **"SUCESSO!"**.
 
-### Não tem Python instalado?
+---
+
+## Configuração do Ambiente (.env)
+
+O script verifica automaticamente se o arquivo `.env` existe. Se não existir, ele cria uma cópia a partir do `env.example`.
+
+Para usar o PostgreSQL, edite o arquivo `.env` com suas configurações:
+
+```bash
+# Configuracoes do PostgreSQL
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=sua_senha_aqui
+POSTGRES_DBNAME=dados_cnpj
+```
+
+---
+
+## Pré-requisitos
+
+### Python
 
 **macOS (via Homebrew):**
 
@@ -47,51 +76,80 @@ brew install python3
 sudo apt update && sudo apt install python3 python3-venv python3-pip
 ```
 
+### Docker (opcional, para usar PostgreSQL)
+
+Instale o Docker Desktop ou Docker Engine:
+
+- **macOS:** https://docs.docker.com/desktop/install/mac-install/
+- **Debian/Ubuntu:** https://docs.docker.com/engine/install/ubuntu/
+
 ---
 
-## Como Executar
+## Como Usar
 
-Execute os scripts a partir da raiz do projeto:
+Execute o script a partir da raiz do projeto passando o comando desejado:
 
 ```bash
-./scripts/run_complete.sh   # Pipeline completo
-./scripts/run_download.sh   # Apenas download
-./scripts/run_load.sh       # Apenas carga no banco
+./scripts/run.sh <comando> [opcoes]
 ```
 
----
+### Comandos Disponíveis
 
-## Lista de Scripts
+| Comando    | Descrição                                                        |
+|------------|------------------------------------------------------------------|
+| `setup`    | Configura o ambiente (cria `.venv` e instala dependências)       |
+| `complete` | Executa o ciclo completo do ETL (download + carga)               |
+| `download` | Executa apenas o download dos dados da Receita Federal           |
+| `load`     | Executa apenas a carga dos dados no banco                        |
+| `stop`     | Para os containers Docker (PostgreSQL)                           |
+| `help`     | Exibe a mensagem de ajuda com todos os comandos                  |
 
-### `000_preparar_ambiente.sh`
+### Opções
 
-- **Propósito:** Configura o ambiente do projeto. Cria o ambiente virtual (`.venv`) e instala as dependências do `requirements.txt`.
-- **Quando usar:** Uma única vez, logo após baixar o projeto e garantir que o Python está instalado.
-
----
-
-### `run_complete.sh`
-
-- **Propósito:** Executa o ciclo **completo** do ETL — baixa os dados mais recentes da Receita Federal e os carrega no banco de dados.
-- **Quando usar:** Para uso geral da ferramenta. **Este é o script principal.**
-
----
-
-### `run_download.sh`
-
-- **Propósito:** Executa apenas a **etapa de download** dos dados da Receita Federal.
-- **Quando usar:** Se quiser apenas baixar os arquivos, sem carregá-los no banco imediatamente.
+| Opção      | Descrição                                                        |
+|------------|------------------------------------------------------------------|
+| `--docker` | Inicia o PostgreSQL via Docker e usa `--engine postgres`         |
 
 ---
 
-### `run_load.sh`
+## Exemplos de Uso
 
-- **Propósito:** Executa apenas a **etapa de carga** dos dados no banco, utilizando arquivos já baixados anteriormente.
-- **Quando usar:** Se os dados já foram baixados e você quer (re)carregá-los no banco.
+### Fluxo com SQLite (padrão)
+
+```bash
+# Configurar o ambiente
+./scripts/run.sh setup
+
+# Executar pipeline completo
+./scripts/run.sh complete
+
+# Ou executar etapas separadamente
+./scripts/run.sh download
+./scripts/run.sh load
+```
+
+### Fluxo com PostgreSQL via Docker
+
+```bash
+# Configurar o ambiente e iniciar PostgreSQL
+./scripts/run.sh setup --docker
+
+# Executar pipeline completo com PostgreSQL
+./scripts/run.sh complete --docker
+
+# Ou executar etapas separadamente
+./scripts/run.sh download
+./scripts/run.sh load --docker
+
+# Parar o PostgreSQL quando terminar
+./scripts/run.sh stop
+```
 
 ---
 
 ## Notas
 
-- Scripts testados em **macOS** e **Debian/Ubuntu**.
+- Script testado em **macOS** e **Debian/Ubuntu**.
 - Certifique-se de ter pelo menos **50GB de espaço livre** para o processo completo de ETL.
+- O arquivo `.env` é criado automaticamente a partir do `.env.example` na primeira execução.
+- A flag `--docker` automaticamente adiciona `--engine postgres` aos comandos.
