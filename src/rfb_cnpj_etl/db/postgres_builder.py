@@ -29,7 +29,6 @@ class PostgresBuilder:
                 user=self.config["user"],
                 password=self.config["password"],
             )
-            # conn.set_client_encoding('WIN1252')
             return conn
         except psycopg2.Error as e:
             print_log(f"ERRO AO CONECTAR NO BANCO: {e}", level="error")
@@ -46,7 +45,6 @@ class PostgresBuilder:
             cur.execute("SELECT 1 FROM pg_database WHERE datname = %s;", (db_name,))
             exists = cur.fetchone()
             if not exists:
-                # cur.execute(f"CREATE DATABASE {db_name} ENCODING 'WIN1252' TEMPLATE template0;")
                 cur.execute(f"CREATE DATABASE {db_name}")
                 print_log("BANCO CRIADO", level="success")
             conn.close()
