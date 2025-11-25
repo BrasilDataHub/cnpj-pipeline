@@ -7,6 +7,6 @@ debug/
 
 # Pastas internas
 docker/volumes
-data/
+data/downloads
 system/
 .env

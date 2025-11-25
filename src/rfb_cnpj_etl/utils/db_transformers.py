@@ -8,6 +8,9 @@ import csv
 from io import BytesIO, StringIO
 from datetime import datetime
 from typing import List, Optional, Union, Callable, Any
+from .ibge_lookup import IBGELookup
+
+IBGE_LOOKUP = IBGELookup()
 
 
 def sanitize_for_sqlite(rows: List[List[Any]]) -> List[List[Any]]:
@@ -113,6 +116,7 @@ def transform_batch(item: dict, sanitizer_func: Callable) -> List:
         rows = normalize_dates(rows, columns, [
             "data_situacao_cadastral", "data_inicio_atividade", "data_situacao_especial"
         ])
+        rows = IBGE_LOOKUP.append_ibge_to_estabelecimentos(rows, columns)
 
     elif table == "simples":
         rows = normalize_dates(

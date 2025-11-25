@@ -7,7 +7,7 @@ Orquestração da carga de dados
 import os
 from typing import Optional
 from .cnpj_data import CNPJDataScraper
-from .db import SQLiteBuilder, run_sqlite_loader, PostgresBuilder, run_postgres_loader
+from .db import SQLiteBuilder, run_sqlite_loader, PostgresBuilder, run_postgres_loader, carregar_tabelas_ibge
 from .utils.logger import print_log
 from .utils.zip_metadata import validate_zip_files, estimate_total_lines_from_size
 from .config import (
@@ -99,6 +99,11 @@ def run_orchestrator(
     # inicializa o script_sql se for init ou load
     if command in ("init", "load"):
         builder.initialize_schema()
+        carregar_tabelas_ibge(
+            engine=engine,
+            db_path=db_path if engine == "sqlite" else None,
+            postgres_config=postgres_config if engine == "postgres" else None
+        )
 
     # carrega os dados (somente no comando load)
     if command == "load":

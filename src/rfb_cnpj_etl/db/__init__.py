@@ -5,3 +5,4 @@ from .sqlite_loader import run_sqlite_loader
 
 from .postgres_builder import PostgresBuilder
 from .postgres_loader import run_postgres_loader
+from .ibge_loader import carregar_tabelas_ibge
