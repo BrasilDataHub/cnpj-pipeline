@@ -23,20 +23,12 @@ SCHEMA = {
             ('nome_motivo', 'VARCHAR(100) NOT NULL')
         ]
     },
-    'municipio': {
-        'source_file_stem': 'Municipios',
-        'columns': [
-            ('cod_municipio', 'VARCHAR(4) PRIMARY KEY'),
-            ('nome_municipio', 'VARCHAR(60) NOT NULL')
-        ]
-    },
     'regiao': {
         'source_file_stem': 'RegioesIbge',
         'columns': [
             ('cod_regiao_ibge', 'INTEGER PRIMARY KEY'),
             ('sigla_regiao', 'VARCHAR(2) UNIQUE'),
-            ('nome_regiao', 'VARCHAR(50) NOT NULL'),
-            ('slug_regiao', 'VARCHAR(120)')
+            ('nome_regiao', 'VARCHAR(50) NOT NULL')
         ],
         'indexes': [
             {'name': 'idx_regiao_sigla', 'columns': ['sigla_regiao']}
@@ -50,8 +42,7 @@ SCHEMA = {
             ('nome_estado', 'VARCHAR(100) NOT NULL'),
             ('latitude', 'NUMERIC(9,6)'),
             ('longitude', 'NUMERIC(9,6)'),
-            ('cod_regiao_ibge', 'INTEGER NOT NULL'),
-            ('slug_estado', 'VARCHAR(150)')
+            ('cod_regiao_ibge', 'INTEGER NOT NULL')
         ],
         'foreign_keys': [
             {'columns': ['cod_regiao_ibge'], 'references': 'regiao(cod_regiao_ibge)'}
@@ -72,8 +63,7 @@ SCHEMA = {
             ('cod_estado_ibge', 'INTEGER NOT NULL'),
             ('cod_municipio', 'VARCHAR(7) UNIQUE'),
             ('ddd', 'VARCHAR(3)'),
-            ('fuso_horario', 'VARCHAR(50)'),
-            ('slug_cidade', 'VARCHAR(180)')
+            ('fuso_horario', 'VARCHAR(50)')
         ],
         'foreign_keys': [
             {'columns': ['cod_estado_ibge'], 'references': 'estado(cod_estado_ibge)'}
@@ -168,7 +158,6 @@ SCHEMA = {
         'foreign_keys': [
             {'columns': ['cnpj_basico'], 'references': 'empresa(cnpj_basico)'},
             {'columns': ['cod_cnae_principal'], 'references': 'cnae(cod_cnae)'},
-            {'columns': ['cod_municipio'], 'references': 'municipio(cod_municipio)'},
             {'columns': ['cod_pais'], 'references': 'pais(cod_pais)'},
             {'columns': ['cod_motivo_situacao_cadastral'], 'references': 'motivo(cod_motivo)'},
             {'columns': ['cod_regiao_ibge'], 'references': 'regiao(cod_regiao_ibge)'},

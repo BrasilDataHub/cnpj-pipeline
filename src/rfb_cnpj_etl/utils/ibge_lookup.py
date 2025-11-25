@@ -41,7 +41,8 @@ class IBGELookup:
     # Leitura dos CSVs
     # ------------------------------------------------------------------
     def _read_csv(self, csv_path: Path) -> Iterable[Dict[str, str]]:
-        linhas = csv_path.read_text(encoding="utf-8").splitlines()
+        # utf-8-sig remove o BOM que aparece em alguns CSVs distribuídos
+        linhas = csv_path.read_text(encoding="utf-8-sig").splitlines()
         if not linhas:
             return []
 
@@ -53,10 +54,15 @@ class IBGELookup:
         except csv.Error:
             pass
 
-        with csv_path.open("r", encoding="utf-8") as handler:
+        with csv_path.open("r", encoding="utf-8-sig") as handler:
             reader = csv.DictReader(handler, delimiter=delimiter)
             for row in reader:
-                yield {k.strip(): (v.strip() if isinstance(v, str) else v) for k, v in row.items()}
+                sanitized = {}
+                for k, v in row.items():
+                    key = k.lstrip("\ufeff").strip() if isinstance(k, str) else k
+                    value = v.strip() if isinstance(v, str) else v
+                    sanitized[key] = value
+                yield sanitized
 
     def _normalize_codigo(self, valor: Optional[str]) -> Optional[str]:
         if valor is None:
@@ -73,7 +79,6 @@ class IBGELookup:
                 "cod_regiao_ibge": codigo,
                 "sigla_regiao": row.get("sigla_regiao") or row.get("abbreviation"),
                 "nome_regiao": row.get("nome_regiao") or row.get("name"),
-                "slug_regiao": row.get("slug_regiao") or row.get("slug"),
             }
 
     def _load_estados(self):
@@ -91,7 +96,6 @@ class IBGELookup:
                 "latitude": row.get("latitude"),
                 "longitude": row.get("longitude"),
                 "cod_regiao_ibge": regiao,
-                "slug_estado": row.get("slug_estado") or row.get("slug"),
             }
             self.estados_por_sigla[sigla] = estado
             self.estados_por_codigo[codigo] = estado
@@ -114,7 +118,6 @@ class IBGELookup:
                 "cod_municipio": siafi,
                 "ddd": row.get("ddd"),
                 "fuso_horario": row.get("fuso_horario") or row.get("timezone"),
-                "slug_cidade": row.get("slug_cidade") or row.get("slug"),
             }
 
             self.cidades_por_siafi[siafi] = cidade
@@ -216,7 +219,6 @@ class IBGELookup:
                 reg["cod_regiao_ibge"],
                 reg.get("sigla_regiao"),
                 reg.get("nome_regiao"),
-                reg.get("slug_regiao")
             ]
             for reg in self.regioes.values()
         ]
@@ -229,7 +231,6 @@ class IBGELookup:
                 est.get("latitude"),
                 est.get("longitude"),
                 est.get("cod_regiao_ibge"),
-                est.get("slug_estado")
             ]
             for est in self.estados_por_codigo.values()
         ]
@@ -251,7 +252,6 @@ class IBGELookup:
                 cid.get("cod_municipio"),
                 cid.get("ddd"),
                 cid.get("fuso_horario"),
-                cid.get("slug_cidade")
             ])
 
         return {

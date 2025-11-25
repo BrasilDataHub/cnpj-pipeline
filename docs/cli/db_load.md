@@ -26,7 +26,7 @@ Realiza apenas a carga a partir de arquivos `.zip` já baixados.
 ## Exemplo
 
 ```bash
-python cnpj.py db load --month 04/2025 --download-dir data/downloads --engine sqlite --skip-index
+python etl.py db load --month 04/2025 --download-dir data/downloads --engine sqlite --skip-index
 ```
 
 > É possível criar os índices depois com o comando `db index`.

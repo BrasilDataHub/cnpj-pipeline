@@ -2,7 +2,7 @@
 
 ## Project Structure & Modules
 - `src/rfb_cnpj_etl/`: core package; CLI entry in `main.py`, orchestration in `orchestrator.py`, ETL helpers in `cnpj_data/`, DB logic in `db/`, shared utilities in `utils/`.
-- `cnpj.py`: thin wrapper that runs the CLI (`python cnpj.py ...`).
+- `etl.py`: thin wrapper that runs the CLI (`python etl.py ...`).
 - `data/`: local workspace for downloads and databases; treat as ephemeral and do not commit.
 - `docs/`: CLI reference and usage examples; start with `docs/cli/*` and `docs/exemplos/*`.
 - `assets/`: ERD, SQL script, and reference PDFs; no code.
@@ -10,12 +10,12 @@
 
 ## Setup, Build, and Run
 - Python 3.9+ recommended. Create a venv and install deps: `python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt`.
-- List available data months: `python cnpj.py get-availables`; latest month: `python cnpj.py get-latest`.
-- Download data: `python cnpj.py download --month MM/AAAA [--workers N --clean --download-dir PATH]`.
-- Initialize DB schema: `python cnpj.py db init --engine sqlite|postgres [--db-path PATH|--db-name NAME]`.
-- Load data into DB: `python cnpj.py db load --engine sqlite|postgres [--month MM/AAAA --download-dir PATH --skip-index --skip-validation --low-memory --parallel]`.
-- Full pipeline: `python cnpj.py complete [--month MM/AAAA --engine ...]` (downloads + load + indexes).
-- For flags and defaults, see `docs/cli/*.md` or `python cnpj.py --help`.
+- List available data months: `python etl.py get-availables`; latest month: `python etl.py get-latest`.
+- Download data: `python etl.py download --month MM/AAAA [--workers N --clean --download-dir PATH]`.
+- Initialize DB schema: `python etl.py db init --engine sqlite|postgres [--db-path PATH|--db-name NAME]`.
+- Load data into DB: `python etl.py db load --engine sqlite|postgres [--month MM/AAAA --download-dir PATH --skip-index --skip-validation --low-memory --parallel]`.
+- Full pipeline: `python etl.py complete [--month MM/AAAA --engine ...]` (downloads + load + indexes).
+- For flags and defaults, see `docs/cli/*.md` or `python etl.py --help`.
 
 ## Coding Style & Naming
 - Python, 4-space indentation, type hints where practical.

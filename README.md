@@ -80,7 +80,7 @@ Executa o ciclo completo de **download + carga** para o mês mais recente dispon
 - Cria índices após a carga
 
 ```bash
-python cnpj.py complete
+python etl.py complete
 ```
 
 > Para usar o **PostgreSQL** como padrão, adicione as variáveis (usuário, senha, nome do banco de dados) e altere
@@ -100,7 +100,7 @@ Este comando é utilizado internamente pelo `complete`.
 - **Continua** os downloads iniciados anteriormente
 
 ```bash
-python cnpj.py download
+python etl.py download
 ```
 
 ### `db load`
@@ -117,7 +117,7 @@ Este comando também é usado internamente por `complete`.
 - Índices são criados ao final
 
 ```bash
-python cnpj.py db load
+python etl.py db load
 ```
 
 ### Logs no terminal
@@ -132,7 +132,7 @@ Veja exemplos em [logs.md](docs/logs.md).
 - Exemplos de uso com **todas as flags disponíveis** estão nos
   arquivos [complete.md](docs/cli/complete.md), [download.md](docs/cli/download.md) e [db_load.md](docs/cli/db_load.md).
 
-- Utilize `python cnpj.py --help` para ver os comandos e argumentos disponíveis.
+- Utilize `python etl.py --help` para ver os comandos e argumentos disponíveis.
 
 ## Personalização
 
@@ -182,7 +182,7 @@ estabelecimentos por cidade.
 rfb-cnpj-etl/
 ├── src/
 │   └── rfb_cnpj_etl/
-│       ├── cnpj.py                     # Script principal com argparse
+│       ├── etl.py                      # Script principal com argparse
 │       ├── orchestrator.py             # Orquestrador de etapas
 │       ├── config.py                   # Configurações gerais e constantes
 │       ├── cnpj_data/                  # Lógica para download e scraping da base de dados CNPJ

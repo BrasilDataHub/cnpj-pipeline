@@ -73,8 +73,8 @@ def run_orchestrator(
             hint = (
                 f"PASTA NÃO ENCONTRADA PARA {month_year}: {files_dir}. "
                 f"Baixe os arquivos antes de carregar: "
-                f"`python cnpj.py download --month {month_year}` "
-                f"ou use `python cnpj.py complete --month {month_year}`. "
+                f"`python etl.py download --month {month_year}` "
+                f"ou use `python etl.py complete --month {month_year}`. "
                 f"Para outro caminho, passe --download-dir."
             )
             print_log(hint, level="error")

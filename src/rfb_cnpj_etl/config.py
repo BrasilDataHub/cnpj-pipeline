@@ -48,10 +48,10 @@ def _make_path_from_env(value: str, default: Path) -> Path:
 
 
 DOWNLOAD_DIR = _make_path_from_env(os.getenv("DOWNLOAD_PATH"), DATA_DIR / "downloads")
-IBGE_CSV_DIR = _make_path_from_env(os.getenv("IBGE_CSV_DIR"), BASE_DIR / "assets" / "ibge")
-IBGE_REGIOES_CSV = IBGE_CSV_DIR / "regioes.csv"
-IBGE_ESTADOS_CSV = IBGE_CSV_DIR / "estados.csv"
-IBGE_CIDADES_CSV = IBGE_CSV_DIR / "cidades.csv"
+IBGE_CSV_DIR = _make_path_from_env(os.getenv("IBGE_CSV_DIR"), DATA_DIR / "locations")
+IBGE_REGIOES_CSV = IBGE_CSV_DIR / "regions.csv"
+IBGE_ESTADOS_CSV = IBGE_CSV_DIR / "states.csv"
+IBGE_CIDADES_CSV = IBGE_CSV_DIR / "cities.csv"
 
 # ---------------------------------------------------------------------------
 # LINKS

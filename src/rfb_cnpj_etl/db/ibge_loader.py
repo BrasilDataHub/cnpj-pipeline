@@ -64,15 +64,14 @@ def carregar_tabelas_ibge(engine: str, db_path: Optional[str] = None, postgres_c
 
         insert_sql = _insert_many_sqlite if engine == "sqlite" else _insert_many_postgres
 
-        insert_sql(conn, "regiao", ["cod_regiao_ibge", "sigla_regiao", "nome_regiao", "slug_regiao"],
+        insert_sql(conn, "regiao", ["cod_regiao_ibge", "sigla_regiao", "nome_regiao"],
                    referencias["regiao"])
         insert_sql(conn, "estado",
-                   ["cod_estado_ibge", "sigla_uf", "nome_estado", "latitude", "longitude", "cod_regiao_ibge",
-                    "slug_estado"],
+                   ["cod_estado_ibge", "sigla_uf", "nome_estado", "latitude", "longitude", "cod_regiao_ibge"],
                    referencias["estado"])
         insert_sql(conn, "cidade",
                    ["cod_cidade_ibge", "nome_cidade", "latitude", "longitude", "capital", "cod_estado_ibge",
-                    "cod_municipio", "ddd", "fuso_horario", "slug_cidade"],
+                    "cod_municipio", "ddd", "fuso_horario"],
                    referencias["cidade"])
 
         conn.commit()

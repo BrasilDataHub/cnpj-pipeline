@@ -30,7 +30,7 @@ Se nenhuma flag for informada:
 ## Uso Básico
 
 ```bash
-python cnpj.py download
+python etl.py download
 ```
 
 Equivalente a: baixar o mês mais recente, salvar na pasta padrão, sem remover arquivos existentes, com 10 workers.
@@ -42,19 +42,19 @@ Equivalente a: baixar o mês mais recente, salvar na pasta padrão, sem remover 
 - Baixar apenas o mais recente (padrão):
 
   ```bash
-  python cnpj.py download
+  python etl.py download
   ```
 
 - Baixar um mês específico:
 
   ```bash
-  python cnpj.py download --month 03/2025
+  python etl.py download --month 03/2025
   ```
 
 - Baixar vários meses e salvar em outra pasta:
 
   ```bash
-  python cnpj.py download \
+  python etl.py download \
     --month 01/2025 02/2025 03/2025 \
     --download-dir data/meus_downloads
   ```
@@ -62,19 +62,19 @@ Equivalente a: baixar o mês mais recente, salvar na pasta padrão, sem remover 
 - Forçar limpeza antes de baixar:
 
   ```bash
-  python cnpj.py download --month 03/2025 --clean
+  python etl.py download --month 03/2025 --clean
   ```
 
 - Limitar a 4 downloads simultâneos:
 
   ```bash
-  python cnpj.py download --month 03/2025 --workers 4
+  python etl.py download --month 03/2025 --workers 4
   ```
 
 - Combinar todas as opções:
 
   ```bash
-  python cnpj.py download \
+  python etl.py download \
     --month 01/2025 02/2025 03/2025 \
     --download-dir data/meus_downloads \
     --clean \

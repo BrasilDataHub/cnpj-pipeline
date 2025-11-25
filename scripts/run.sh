@@ -258,7 +258,7 @@ cmd_complete() {
     fi
 
     echo ""
-    python3 cnpj.py complete $ENGINE_FLAG
+    python3 etl.py complete $ENGINE_FLAG
     echo ""
 }
 
@@ -268,7 +268,7 @@ cmd_download() {
     check_venv
     activate_venv
     echo ""
-    python3 cnpj.py download
+    python3 etl.py download
     echo ""
 }
 
@@ -285,7 +285,7 @@ cmd_load() {
     fi
 
     echo ""
-    python3 cnpj.py db load $ENGINE_FLAG
+    python3 etl.py db load $ENGINE_FLAG
     echo ""
 }
 

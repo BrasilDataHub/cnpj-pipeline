@@ -17,6 +17,11 @@ from ..utils.db_transformers import transform_batch, sanitize_for_sqlite, saniti
 
 def get_targets_from_zip_name(zip_name: str) -> List[Dict]:
     zip_stem = Path(zip_name).stem.rstrip('0123456789')
+    skip_prefixes = {"municipios"}
+    if zip_stem.lower() in skip_prefixes:
+        print_log(f"IGNORANDO ARQUIVO NÃO UTILIZADO: {zip_name}", level="docs")
+        return []
+
     targets = []
     for table_name, definition in SCHEMA.items():
         if definition['source_file_stem'].lower() == zip_stem.lower():
@@ -24,7 +29,7 @@ def get_targets_from_zip_name(zip_name: str) -> List[Dict]:
             targets.append({'name': table_name, 'columns': columns})
 
     if not targets:
-        raise ValueError(f"Arquivo ZIP '{zip_name}' não corresponde a nenhuma tabela no SCHEMA.")
+        print_log(f"ARQUIVO ZIP DESCONHECIDO IGNORADO: {zip_name}", level="warning")
     return targets
 
 

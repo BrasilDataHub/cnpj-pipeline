@@ -36,5 +36,5 @@ Se nenhuma flag for usada:
 ### Exemplo
 
 ```bash
-python cnpj.py complete --month 03/2025 --engine sqlite --clean
+python etl.py complete --month 03/2025 --engine sqlite --clean
 ```
