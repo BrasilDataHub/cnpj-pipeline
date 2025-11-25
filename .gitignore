@@ -1,0 +1,11 @@
+.venv
+.idea
+__pycache__/
+debug/
+*.zip
+*.db
+
+
+# Pastas internas
+data/
+system/
