@@ -66,6 +66,7 @@ DEFAULT_ENGINE = "postgres"  # engine padrão de banco de dados
 DEFAULT_PARALLEL = True  # paralelismo de inserção no banco de dados
 DEFAULT_LOW_MEMORY = False  # habilita o uso de memória limitada para inserção no banco
 AVG_COMPRESSED_LINE_SIZE_BYTES = 35  # 35 bytes/linha para estimar o total de linhas e calcular o progresso da carga de dados
+BRAZIL_COUNTRY_CODES = {"105", "0105"}  # códigos RFB/IBGE que representam Brasil
 
 BATCH_SIZE = 250_000  # número de registros por batch ao inserir no banco
 BATCH_RATIO = {  # proporção para utilizar em tabelas específicas

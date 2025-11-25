@@ -7,7 +7,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Dict, Iterable, List, Optional, Tuple
 from .logger import print_log
-from ..config import IBGE_REGIOES_CSV, IBGE_ESTADOS_CSV, IBGE_CIDADES_CSV
+from ..config import IBGE_REGIOES_CSV, IBGE_ESTADOS_CSV, IBGE_CIDADES_CSV, BRAZIL_COUNTRY_CODES
 
 
 class IBGELookup:
@@ -255,9 +255,9 @@ class IBGELookup:
             ])
 
         return {
-            "regiao": regioes_rows,
-            "estado": estados_rows,
-            "cidade": cidades_rows
+            "ibge_regiao": regioes_rows,
+            "ibge_estado": estados_rows,
+            "ibge_cidade": cidades_rows
         }
 
     def append_ibge_to_estabelecimentos(self, rows: List[List], columns: List[str]) -> List[List]:
@@ -273,14 +273,22 @@ class IBGELookup:
             idx_uf = columns.index("uf")
         except ValueError:
             idx_uf = None
+        try:
+            idx_pais = columns.index("cod_pais")
+        except ValueError:
+            idx_pais = None
 
         enriched = []
         for row in rows:
             nova_linha = list(row)
             cod_municipio = nova_linha[idx_municipio] if idx_municipio is not None and idx_municipio < len(nova_linha) else None
             uf = nova_linha[idx_uf] if idx_uf is not None and idx_uf < len(nova_linha) else None
+            cod_pais = nova_linha[idx_pais] if idx_pais is not None and idx_pais < len(nova_linha) else None
 
-            cod_regiao_ibge, cod_estado_ibge, cod_cidade_ibge = self.lookup_codigos(cod_municipio, uf)
+            if cod_pais and str(cod_pais).strip() not in BRAZIL_COUNTRY_CODES:
+                cod_regiao_ibge = cod_estado_ibge = cod_cidade_ibge = None
+            else:
+                cod_regiao_ibge, cod_estado_ibge, cod_cidade_ibge = self.lookup_codigos(cod_municipio, uf)
 
             # garante alinhamento antes de anexar os novos campos
             while len(nova_linha) < base_len:

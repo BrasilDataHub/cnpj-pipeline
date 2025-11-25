@@ -40,20 +40,20 @@ def carregar_tabelas_ibge(postgres_config: Optional[Dict] = None):
         conn = psycopg2.connect(**postgres_config)
 
         cur = conn.cursor()
-        cur.execute('DELETE FROM "cidade";')
-        cur.execute('DELETE FROM "estado";')
-        cur.execute('DELETE FROM "regiao";')
+        cur.execute('DELETE FROM "ibge_cidade";')
+        cur.execute('DELETE FROM "ibge_estado";')
+        cur.execute('DELETE FROM "ibge_regiao";')
         cur.close()
 
-        _insert_many_postgres(conn, "regiao", ["cod_regiao_ibge", "sigla_regiao", "nome_regiao"],
-                              referencias["regiao"])
-        _insert_many_postgres(conn, "estado",
+        _insert_many_postgres(conn, "ibge_regiao", ["cod_regiao_ibge", "sigla_regiao", "nome_regiao"],
+                              referencias["ibge_regiao"])
+        _insert_many_postgres(conn, "ibge_estado",
                               ["cod_estado_ibge", "sigla_uf", "nome_estado", "latitude", "longitude", "cod_regiao_ibge"],
-                              referencias["estado"])
-        _insert_many_postgres(conn, "cidade",
+                              referencias["ibge_estado"])
+        _insert_many_postgres(conn, "ibge_cidade",
                               ["cod_cidade_ibge", "nome_cidade", "latitude", "longitude", "capital", "cod_estado_ibge",
                                "cod_municipio", "ddd", "fuso_horario"],
-                              referencias["cidade"])
+                              referencias["ibge_cidade"])
 
         conn.commit()
         print_log("TABELAS IBGE ATUALIZADAS", level="success")

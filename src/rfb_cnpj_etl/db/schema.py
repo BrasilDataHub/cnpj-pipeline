@@ -23,7 +23,18 @@ SCHEMA = {
             ('nome_motivo', 'VARCHAR(100) NOT NULL')
         ]
     },
-    'regiao': {
+    'municipio_rfb': {
+        'source_file_stem': 'Municipios',
+        'columns': [
+            ('cod_municipio', 'VARCHAR(7) PRIMARY KEY'),
+            ('nome_municipio', 'VARCHAR(120) NOT NULL'),
+            ('uf', 'VARCHAR(2)')
+        ],
+        'indexes': [
+            {'name': 'idx_municipio_rfb_uf', 'columns': ['uf']}
+        ]
+    },
+    'ibge_regiao': {
         'source_file_stem': 'RegioesIbge',
         'columns': [
             ('cod_regiao_ibge', 'INTEGER PRIMARY KEY'),
@@ -31,10 +42,10 @@ SCHEMA = {
             ('nome_regiao', 'VARCHAR(50) NOT NULL')
         ],
         'indexes': [
-            {'name': 'idx_regiao_sigla', 'columns': ['sigla_regiao']}
+            {'name': 'idx_ibge_regiao_sigla', 'columns': ['sigla_regiao']}
         ]
     },
-    'estado': {
+    'ibge_estado': {
         'source_file_stem': 'EstadosIbge',
         'columns': [
             ('cod_estado_ibge', 'INTEGER PRIMARY KEY'),
@@ -45,14 +56,14 @@ SCHEMA = {
             ('cod_regiao_ibge', 'INTEGER NOT NULL')
         ],
         'foreign_keys': [
-            {'columns': ['cod_regiao_ibge'], 'references': 'regiao(cod_regiao_ibge)'}
+            {'columns': ['cod_regiao_ibge'], 'references': 'ibge_regiao(cod_regiao_ibge)'}
         ],
         'indexes': [
-            {'name': 'idx_estado_sigla', 'columns': ['sigla_uf']},
-            {'name': 'idx_estado_regiao', 'columns': ['cod_regiao_ibge']}
+            {'name': 'idx_ibge_estado_sigla', 'columns': ['sigla_uf']},
+            {'name': 'idx_ibge_estado_regiao', 'columns': ['cod_regiao_ibge']}
         ]
     },
-    'cidade': {
+    'ibge_cidade': {
         'source_file_stem': 'CidadesIbge',
         'columns': [
             ('cod_cidade_ibge', 'INTEGER PRIMARY KEY'),
@@ -66,11 +77,11 @@ SCHEMA = {
             ('fuso_horario', 'VARCHAR(50)')
         ],
         'foreign_keys': [
-            {'columns': ['cod_estado_ibge'], 'references': 'estado(cod_estado_ibge)'}
+            {'columns': ['cod_estado_ibge'], 'references': 'ibge_estado(cod_estado_ibge)'}
         ],
         'indexes': [
-            {'name': 'idx_cidade_estado', 'columns': ['cod_estado_ibge']},
-            {'name': 'idx_cidade_municipio', 'columns': ['cod_municipio']}
+            {'name': 'idx_ibge_cidade_estado', 'columns': ['cod_estado_ibge']},
+            {'name': 'idx_ibge_cidade_municipio', 'columns': ['cod_municipio']}
         ]
     },
     'natureza_juridica': {
@@ -140,7 +151,7 @@ SCHEMA = {
             ('bairro', 'VARCHAR(60)'),
             ('cep', 'VARCHAR(8)'),
             ('uf', 'VARCHAR(2) NOT NULL'),
-            ('cod_municipio', 'VARCHAR(4)'),
+            ('cod_municipio', 'VARCHAR(7)'),
             ('ddd_telefone_1', 'VARCHAR(4)'),
             ('telefone_1', 'VARCHAR(10)'),
             ('ddd_telefone_2', 'VARCHAR(4)'),
@@ -160,9 +171,9 @@ SCHEMA = {
             {'columns': ['cod_cnae_principal'], 'references': 'cnae(cod_cnae)'},
             {'columns': ['cod_pais'], 'references': 'pais(cod_pais)'},
             {'columns': ['cod_motivo_situacao_cadastral'], 'references': 'motivo(cod_motivo)'},
-            {'columns': ['cod_regiao_ibge'], 'references': 'regiao(cod_regiao_ibge)'},
-            {'columns': ['cod_estado_ibge'], 'references': 'estado(cod_estado_ibge)'},
-            {'columns': ['cod_cidade_ibge'], 'references': 'cidade(cod_cidade_ibge)'}
+            {'columns': ['cod_regiao_ibge'], 'references': 'ibge_regiao(cod_regiao_ibge)'},
+            {'columns': ['cod_estado_ibge'], 'references': 'ibge_estado(cod_estado_ibge)'},
+            {'columns': ['cod_cidade_ibge'], 'references': 'ibge_cidade(cod_cidade_ibge)'}
         ],
         'indexes': [
             {'name': 'idx_estab_empresa', 'columns': ['cnpj_basico']},
