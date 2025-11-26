@@ -17,9 +17,6 @@ jobs:
 
   docker-build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      issues: write
     outputs:
       IMAGE_TAG: ${{ steps.docker_push.outputs.IMAGE_TAG }}
       VERSION: ${{ steps.version.outputs.VERSION }}
