@@ -186,40 +186,59 @@ Todas as **constantes globais** como diretórios, downloads simultâneos, entre 
 As definições de chaves primárias, estrangeiras e índices podem ser encontradas em `db/schema.py`.
 Edite conforme a sua necessidade.
 
-### Scripts SQL de Otimização
+### Scripts SQL Auxiliares (Opcionais)
 
-Na pasta `sql/` estão disponíveis scripts para otimizações avançadas:
+Na pasta `sql/` estão disponíveis **scripts auxiliares** para otimizações avançadas. Esses scripts **não são executados
+automaticamente** pelo ETL e devem ser aplicados manualmente conforme a necessidade do seu ambiente.
 
-| Arquivo | Descrição |
-|---------|-----------|
-| `indexes.sql` | ~50 índices otimizados (BTREE, GIN/pg_trgm, BRIN, HASH) |
-| `materialized_views.sql` | 6 views materializadas para estatísticas agregadas |
-| `general_improvements.sql` | Extensões (pg_trgm, pg_prewarm) e funções auxiliares |
+> **Importante:** Esses scripts são complementares ao fluxo principal. O ETL já cria índices básicos definidos em
+> `schema.py`. Os scripts abaixo oferecem otimizações adicionais para cenários específicos.
 
-Esses scripts podem ser executados manualmente após a carga para melhorias adicionais de performance.
+#### Quando utilizar
 
-## Benchmark de execução
+Execute esses scripts **após a conclusão do ETL** (após `db fk` ou `complete`), quando:
+- Precisar de buscas textuais otimizadas (LIKE, trigrams)
+- Quiser estatísticas pré-calculadas para dashboards
+- Necessitar de índices especializados para consultas frequentes
 
-| Processo                     | Tempo                   |
-|------------------------------|-------------------------|
-| Download dos arquivos        | ~ 01:00:00              |
-| Preparação do banco de dados | ~ 00:05:00              |
-| Carga de dados completa      | 01:30:00 ~ 02:30:00     |
-| Pós-processamento            | ~ 00:15:00              |
-| Criação dos índices          | ~ 01:00:00              |
-| **Total**                    | **04:00:00 ~ 05:00:00** |
+#### Scripts disponíveis
 
-* Utilizando a base de dados de junho de 2025.
+| Arquivo | Propósito | Pré-requisitos |
+|---------|-----------|----------------|
+| `indexes.sql` | ~50 índices otimizados (BTREE, GIN/pg_trgm, BRIN, HASH) para buscas textuais, filtros por localização, datas e CNAEs | Extensão `pg_trgm` (criada automaticamente pelo script) |
+| `materialized_views.sql` | 6 views materializadas com estatísticas agregadas por estado, município, CNAE e período | Dados já carregados no banco |
+| `general_improvements.sql` | Extensões PostgreSQL, funções de manutenção, validações e configurações de performance | Permissões de superusuário para algumas operações |
 
-> Equipamento: i5-1235U, 16GB RAM, HDD, Windows 11
+#### Como executar
 
-## Estrutura do Banco de Dados
+```bash
+# Conectar ao banco e executar (substitua as credenciais)
+psql -h localhost -U seu_usuario -d cnpj_rfb -f sql/indexes.sql
+psql -h localhost -U seu_usuario -d cnpj_rfb -f sql/materialized_views.sql
+psql -h localhost -U seu_usuario -d cnpj_rfb -f sql/general_improvements.sql
+```
 
-O modelo relacional do banco de dados pode ser visualizado nos arquivos abaixo:
+#### Detalhes de cada script
 
-- [postgres_erd.png](assets/postgres_erd.png): visualização da estrutura relacional das tabelas.
-- [postgres_erd.pgerd](assets/postgres_erd.pgerd): arquivo do diagrama exportado pelo pgAdmin.
-- [postgres_script.sql](assets/postgres_script.sql): script SQL completo para criação do banco PostgreSQL.
+**`indexes.sql`** - Índices para consultas específicas:
+- Busca textual com `LIKE '%termo%'` (GIN + pg_trgm)
+- Filtros por localização (IBGE, UF, município)
+- Consultas por faixa de datas (BRIN para tabelas grandes)
+- Lookups por CNPJ completo (HASH para igualdade)
+
+**`materialized_views.sql`** - Estatísticas pré-calculadas:
+- `mv_stats_estado`: empresas ativas por estado
+- `mv_stats_municipio`: empresas ativas por município
+- `mv_stats_cnae`: distribuição por atividade econômica
+- `mv_stats_cnae_estado`: CNAEs por estado
+- `mv_abertura_periodo`: aberturas por período
+- `mv_top_cnaes_cidade`: principais CNAEs por cidade
+- Função `refresh_all_mvs()` para atualização
+
+**`general_improvements.sql`** - Configurações e manutenção:
+- Extensões: `pg_trgm`, `pg_prewarm`, `pg_stat_statements`
+- Funções: `prewarm_critical_indexes()`, `vacuum_analyze_all()`, `table_statistics()`
+- Validações: `validate_cnpj_completo()`, `check_referential_integrity()`
 
 ## Exemplos de Consultas
 
@@ -253,10 +272,10 @@ rfb-cnpj-etl/
 │           ├── progress.py             # Barra e log de progresso
 │           ├── db_transformers.py      # Transformação de dados para o banco
 │           └── db_batch_producer.py    # Geração de lotes de dados para carga
-├── sql/                                # Scripts SQL para otimizações
-│   ├── indexes.sql                     # Índices otimizados (BTREE, GIN, BRIN, HASH)
-│   ├── materialized_views.sql          # Views materializadas para estatísticas
-│   └── general_improvements.sql        # Extensões e funções auxiliares
+├── sql/                                # Scripts SQL auxiliares (execução manual)
+│   ├── indexes.sql                     # Índices otimizados para buscas textuais e filtros
+│   ├── materialized_views.sql          # Views materializadas com estatísticas agregadas
+│   └── general_improvements.sql        # Extensões, funções de manutenção e validações
 ├── assets/                             # Dados e arquivos auxiliares
 │   ├── cnpj-metadados.pdf              # Dicionário de Dados do Cadastro Nacional da Pessoa Jurídica
 │   ├── postgres_script.sql             # Script SQL para criação do banco de dados PostgreSQL

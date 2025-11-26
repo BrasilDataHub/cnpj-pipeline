@@ -164,7 +164,7 @@ SCHEMA = {
             ('cod_estado_ibge', 'INTEGER'),
             ('cod_cidade_ibge', 'INTEGER')
         ],
-        'primary_key': ['cnpj_basico', 'cnpj_ordem', 'cnpj_dv'],
+        'primary_key': ['cnpj_completo'],  # PK simplificada usando cnpj_completo
         'foreign_keys': [
             {'columns': ['cnpj_basico'], 'references': 'empresa(cnpj_basico)'},
             {'columns': ['cod_cnae_principal'], 'references': 'cnae(cod_cnae)'},
@@ -237,9 +237,6 @@ SCHEMA = {
     'estabelecimento_cnae_sec': {
         'source_file_stem': 'Estabelecimentos',
         'columns': [
-            ('cnpj_basico', 'VARCHAR(8) NOT NULL'),
-            ('cnpj_ordem', 'VARCHAR(4) NOT NULL'),
-            ('cnpj_dv', 'VARCHAR(2) NOT NULL'),
             ('cnpj_completo', 'CHAR(14) NOT NULL'),  # Computado no Python durante carga
             ('cod_cnae', 'VARCHAR(7) NOT NULL'),
             # Colunas desnormalizadas para evitar JOINs custosos
@@ -249,12 +246,11 @@ SCHEMA = {
             ('data_inicio_atividade', 'DATE')
         ],
         'foreign_keys': [
-            {'columns': ['cnpj_basico', 'cnpj_ordem', 'cnpj_dv'],
-             'references': 'estabelecimento(cnpj_basico, cnpj_ordem, cnpj_dv)'},
+            {'columns': ['cnpj_completo'], 'references': 'estabelecimento(cnpj_completo)'},
             {'columns': ['cod_cnae'], 'references': 'cnae(cod_cnae)'}
         ],
         'indexes': [
-            {'name': 'idx_estab_cnae_sec', 'columns': ['cnpj_basico', 'cnpj_ordem', 'cnpj_dv']}
+            {'name': 'idx_estab_cnae_sec_cnpj', 'columns': ['cnpj_completo']}
         ]
     }
 }

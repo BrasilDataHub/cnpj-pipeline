@@ -161,11 +161,9 @@ def transform_batch(item: dict, sanitizer_func: Callable) -> List:
 
     elif table == "estabelecimento_cnae_sec":
         # Normaliza data_inicio_atividade
+        # Nota: cnpj_completo já é computado no db_batch_producer.py para esta tabela
         if 'data_inicio_atividade' in columns:
             rows = normalize_dates(rows, columns, ["data_inicio_atividade"])
-        # Computar CNPJ completo para CNAEs secundários
-        if 'cnpj_completo' in columns:
-            rows = compute_cnpj_completo(rows, columns)
 
     elif table == "simples":
         rows = normalize_dates(

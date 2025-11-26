@@ -228,18 +228,14 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_empresa_razao_social_prefix
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_cnae_sec_cnae 
     ON estabelecimento_cnae_sec (cod_cnae);
 
--- Estabelecimento (para JOIN)
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_cnae_sec_estab 
-    ON estabelecimento_cnae_sec (cnpj_basico, cnpj_ordem, cnpj_dv);
-
--- CNPJ completo
+-- CNPJ completo (FK para estabelecimento)
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_cnae_sec_cnpj_completo 
     ON estabelecimento_cnae_sec (cnpj_completo);
 
 -- Covering index para CNAE secundário (evita table lookup)
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_cnae_sec_covering 
     ON estabelecimento_cnae_sec (cod_cnae) 
-    INCLUDE (cnpj_basico, cnpj_ordem, cnpj_dv);
+    INCLUDE (cnpj_completo);
 
 -- CNAE secundário + localização (requer colunas desnormalizadas)
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_cnae_sec_cnae_estado 

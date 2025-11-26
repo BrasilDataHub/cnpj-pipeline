@@ -81,21 +81,24 @@ def _process_zip_file(zip_file: Path, insertion_queue: Queue,
                                     data_inicio = row[estab_cols_map['data_inicio_atividade']] if estab_cols_map['data_inicio_atividade'] < len(row) else None
                                     cod_regiao_ibge, cod_estado_ibge, cod_cidade_ibge = IBGE_LOOKUP.lookup_codigos(cod_municipio, uf)
 
+                                    # Computa cnpj_completo diretamente aqui para estabelecimento_cnae_sec
+                                    cnpj_basico = row[estab_cols_map['cnpj_basico']]
+                                    cnpj_ordem = row[estab_cols_map['cnpj_ordem']]
+                                    cnpj_dv = row[estab_cols_map['cnpj_dv']]
+                                    cnpj_completo = f"{cnpj_basico}{cnpj_ordem}{cnpj_dv}"
+
                                     for cnae in cnaes_secundarios:
                                         cnae_limpo = cnae.strip()
                                         if cnae_limpo:
-                                            # Propaga dados desnormalizados do estabelecimento para cnae_sec
                                             # Ordem conforme SCHEMA['estabelecimento_cnae_sec']['columns']
+                                            # Estrutura simplificada: apenas cnpj_completo + dados desnormalizados
                                             new_row = [
-                                                row[estab_cols_map['cnpj_basico']],  # cnpj_basico
-                                                row[estab_cols_map['cnpj_ordem']],   # cnpj_ordem
-                                                row[estab_cols_map['cnpj_dv']],      # cnpj_dv
-                                                '',                                  # cnpj_completo (computado no transform_batch)
-                                                cnae_limpo,                          # cod_cnae
-                                                cod_regiao_ibge,                     # cod_regiao_ibge (desnormalizado)
-                                                cod_estado_ibge,                     # cod_estado_ibge (desnormalizado)
-                                                cod_cidade_ibge,                     # cod_cidade_ibge (desnormalizado)
-                                                data_inicio,                         # data_inicio_atividade (desnormalizado)
+                                                cnpj_completo,     # cnpj_completo (chave)
+                                                cnae_limpo,        # cod_cnae
+                                                cod_regiao_ibge,   # cod_regiao_ibge (desnormalizado)
+                                                cod_estado_ibge,   # cod_estado_ibge (desnormalizado)
+                                                cod_cidade_ibge,   # cod_cidade_ibge (desnormalizado)
+                                                data_inicio,       # data_inicio_atividade (desnormalizado)
                                             ]
                                             batches[table_name].append(new_row)
                                 elif table_name == 'estabelecimento':
