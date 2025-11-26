@@ -37,7 +37,7 @@ def run_orchestrator(
         - load: Carrega dados (com ou sem --only-data)
         - patch: Aplica correções estáticas na base
         - pk: Adiciona chaves primárias
-        - index: Cria índices
+        - index: Cria todos os índices (básicos + avançados)
         - fk: Cria chaves estrangeiras
 
     :params:

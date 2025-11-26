@@ -67,7 +67,7 @@ python etl.py <comando> [opções]
 | `db load` | Carrega dados dos arquivos ZIP |
 | `db patch` | Aplica correções estáticas na base |
 | `db pk` | Adiciona chaves primárias |
-| `db index` | Cria índices |
+| `db index` | Cria todos os índices (básicos + avançados) |
 | `db fk` | Cria chaves estrangeiras |
 | `complete` | Executa todo o pipeline (download + carga) |
 
@@ -142,7 +142,7 @@ Carrega os dados dos arquivos ZIP para o banco de dados.
 | `--only-data` | flag | - | Carrega apenas dados (sem patch/pk/index/fk) |
 
 ```bash
-# Carga completa padrão
+# Carga completa padrão (inclui todos os índices)
 python etl.py db load --month 11/2025
 
 # Carga apenas dados (sem extras)
@@ -165,9 +165,18 @@ Executam etapas específicas do processo de carga.
 ```bash
 python etl.py db patch    # Aplica correções estáticas
 python etl.py db pk       # Adiciona chaves primárias
-python etl.py db index    # Cria índices
+python etl.py db index    # Cria todos os índices (básicos + avançados)
 python etl.py db fk       # Cria chaves estrangeiras
 ```
+
+O comando `db index` cria automaticamente:
+- **Índices básicos**: BTREE simples para JOINs, FKs e consultas comuns (~25 índices)
+- **Índices avançados** (~29 índices):
+  - **GIN (pg_trgm)**: Busca textual com `LIKE '%termo%'` em nome fantasia, razão social e nome de sócios
+  - **BRIN**: Índices compactos para colunas de data (economia de ~95% de espaço)
+  - **HASH**: Lookups ultra-rápidos para CNPJ e email
+  - **Parciais**: Índices apenas para empresas ativas ou com email preenchido
+  - **Compostos**: Otimizados para consultas de prospecção, filtros por localização e CNAE
 
 ---
 
@@ -188,6 +197,7 @@ Executa o pipeline completo: **download + carga** em sequência.
 | `--parallel` | flag | - | Usa multi-threading |
 
 ```bash
+# Pipeline completo (inclui todos os índices automaticamente)
 python etl.py complete --month 11/2025 --parallel --clean
 ```
 
@@ -207,7 +217,7 @@ O ETL pode ser executado **etapa por etapa**, útil para:
 | 3 | `python etl.py db load --only-data` | Carrega dados (sem extras) |
 | 4 | `python etl.py db patch` | Aplica correções estáticas |
 | 5 | `python etl.py db pk` | Adiciona chaves primárias |
-| 6 | `python etl.py db index` | Cria índices |
+| 6 | `python etl.py db index` | Cria todos os índices (básicos + avançados) |
 | 7 | `python etl.py db fk` | Cria chaves estrangeiras |
 
 **Retomar após falha:**
@@ -266,21 +276,19 @@ Edite conforme a sua necessidade.
 Na pasta `sql/` estão disponíveis **scripts auxiliares** para otimizações avançadas. Esses scripts **não são executados
 automaticamente** pelo ETL e devem ser aplicados manualmente conforme a necessidade do seu ambiente.
 
-> **Importante:** Esses scripts são complementares ao fluxo principal. O ETL já cria índices básicos definidos em
-> `schema.py`. Os scripts abaixo oferecem otimizações adicionais para cenários específicos.
+> **Nota:** Todos os índices (básicos e avançados como GIN, BRIN, HASH) já são criados automaticamente
+> pelo comando `db index`. Os scripts abaixo oferecem otimizações adicionais para cenários específicos.
 
 #### Quando utilizar
 
 Execute esses scripts **após a conclusão do ETL** (após `db fk` ou `complete`), quando:
-- Precisar de buscas textuais otimizadas (LIKE, trigrams)
 - Quiser estatísticas pré-calculadas para dashboards
-- Necessitar de índices especializados para consultas frequentes
+- Necessitar de funções de manutenção e validação
 
 #### Scripts disponíveis
 
 | Arquivo | Propósito | Pré-requisitos |
 |---------|-----------|----------------|
-| `indexes.sql` | ~50 índices otimizados (BTREE, GIN/pg_trgm, BRIN, HASH) para buscas textuais, filtros por localização, datas e CNAEs | Extensão `pg_trgm` (criada automaticamente pelo script) |
 | `materialized_views.sql` | 6 views materializadas com estatísticas agregadas por estado, município, CNAE e período | Dados já carregados no banco |
 | `general_improvements.sql` | Extensões PostgreSQL, funções de manutenção, validações e configurações de performance | Permissões de superusuário para algumas operações |
 
@@ -288,18 +296,11 @@ Execute esses scripts **após a conclusão do ETL** (após `db fk` ou `complete`
 
 ```bash
 # Conectar ao banco e executar (substitua as credenciais)
-psql -h localhost -U seu_usuario -d cnpj_rfb -f sql/indexes.sql
 psql -h localhost -U seu_usuario -d cnpj_rfb -f sql/materialized_views.sql
 psql -h localhost -U seu_usuario -d cnpj_rfb -f sql/general_improvements.sql
 ```
 
 #### Detalhes de cada script
-
-**`indexes.sql`** - Índices para consultas específicas:
-- Busca textual com `LIKE '%termo%'` (GIN + pg_trgm)
-- Filtros por localização (IBGE, UF, município)
-- Consultas por faixa de datas (BRIN para tabelas grandes)
-- Lookups por CNPJ completo (HASH para igualdade)
 
 **`materialized_views.sql`** - Estatísticas pré-calculadas:
 - `mv_stats_estado`: empresas ativas por estado
@@ -345,7 +346,8 @@ rfb-cnpj-etl/
 │       │   ├── postgres_builder.py    # Criação do banco de dados (PostgreSQL)
 │       │   ├── postgres_loader.py     # Carregamento dos dados no banco (PostgreSQL)
 │       │   ├── ibge_loader.py         # Carregamento das tabelas IBGE
-│       │   └── schema.py              # Esquema do banco de dados (tabelas, chaves e índices)
+│       │   ├── schema.py              # Esquema do banco de dados (tabelas, chaves e índices)
+│       │   └── advanced_indexes.py    # Definição dos índices avançados (GIN, BRIN, HASH)
 │       └── utils/                     # Funções utilitárias
 │           ├── __init__.py
 │           ├── logger.py              # Print personalizado com hora e tempo de execução
@@ -356,7 +358,6 @@ rfb-cnpj-etl/
 │           ├── ibge_lookup.py         # Lookup de códigos IBGE
 │           └── zip_metadata.py        # Validação e metadados dos arquivos ZIP
 ├── sql/                               # Scripts SQL auxiliares (execução manual)
-│   ├── indexes.sql                    # Índices otimizados para buscas textuais e filtros
 │   ├── materialized_views.sql         # Views materializadas com estatísticas agregadas
 │   ├── general_improvements.sql       # Extensões, funções de manutenção e validações
 │   └── query_postgres.md              # Exemplos de consultas SQL para PostgreSQL

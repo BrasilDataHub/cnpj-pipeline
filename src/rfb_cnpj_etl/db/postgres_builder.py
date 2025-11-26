@@ -8,6 +8,13 @@ import psycopg2
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 from ..db.schema import SCHEMA
+from ..db.advanced_indexes import (
+    ADVANCED_INDEXES,
+    REQUIRED_EXTENSIONS,
+    INDEX_CREATION_CONFIG,
+    build_create_index_sql,
+    get_indexes_by_table
+)
 from ..utils.db_patch import apply_static_fixes
 from ..utils.logger import print_log
 
@@ -52,6 +59,27 @@ class PostgresBuilder:
             conn.close()
         except psycopg2.Error as e:
             print_log(f"ERRO AO CRIAR BANCO: {e}", level="error")
+            raise
+
+    def enable_extensions(self):
+        """
+        Habilita extensões necessárias para índices avançados.
+        Extensões habilitadas: pg_trgm (busca textual com trigrams).
+        """
+        try:
+            print_log("HABILITANDO EXTENSÕES...", level="task")
+            if self.conn is None:
+                self.conn = self._connect()
+            self.conn.autocommit = True
+            cur = self.conn.cursor()
+
+            for ext in REQUIRED_EXTENSIONS:
+                cur.execute(f"CREATE EXTENSION IF NOT EXISTS {ext};")
+                print_log(f"  -> Extensão '{ext}' habilitada", level="docs")
+
+            print_log("EXTENSÕES HABILITADAS", level="success")
+        except psycopg2.Error as e:
+            print_log(f"ERRO AO HABILITAR EXTENSÕES: {e}", level="error")
             raise
 
     def drop_tables(self):
@@ -260,13 +288,18 @@ class PostgresBuilder:
 
     def create_indexes(self, parallel: bool = True, max_workers: int = 4):
         """
-        Cria os índices definidos no SCHEMA.
+        Cria todos os índices: básicos (definidos no SCHEMA) e avançados (GIN, BRIN, HASH).
+        
+        Esta função executa duas etapas:
+        1. Índices básicos: BTREE simples para JOINs, FKs e consultas comuns
+        2. Índices avançados: GIN (busca textual), BRIN (datas), HASH (lookups), parciais e compostos
         
         Args:
             parallel: Se True, cria índices em paralelo usando múltiplas conexões.
             max_workers: Número máximo de workers para criação paralela.
         """
         try:
+            # Etapa 1: Índices básicos (SCHEMA)
             all_indexes = []
             for table_name, definition in SCHEMA.items():
                 if 'indexes' in definition:
@@ -279,6 +312,9 @@ class PostgresBuilder:
                 self._create_indexes_parallel(all_indexes, max_workers)
             else:
                 self._create_indexes_sequential(all_indexes)
+            
+            # Etapa 2: Índices avançados (GIN, BRIN, HASH, parciais, compostos)
+            self.create_advanced_indexes(parallel=parallel, max_workers=max_workers)
                 
         except Exception as e:
             print_log(f"ERRO AO CRIAR ÍNDICES: {e}", level="error")
@@ -366,11 +402,193 @@ class PostgresBuilder:
 
         print_log("TODOS OS ÍNDICES FORAM CRIADOS", level="success")
 
+    def _create_advanced_indexes_for_table(self, table_name: str, indexes: list,
+                                            progress_lock: Lock, progress_counter: dict,
+                                            total: int) -> list:
+        """
+        Cria todos os índices avançados de uma tabela SEQUENCIALMENTE usando uma conexão dedicada.
+        Isso evita deadlocks que ocorrem quando múltiplas conexões tentam criar
+        índices na mesma tabela com CREATE INDEX CONCURRENTLY.
+        
+        Returns:
+            list: Lista de tuplas (index_name, success: bool, error_msg: str or None)
+        """
+        results = []
+        conn = None
+        
+        try:
+            # Uma conexão por tabela
+            conn = self._connect()
+            conn.autocommit = True
+            cur = conn.cursor()
+            
+            for index_def in indexes:
+                index_name = index_def.get('name', 'desconhecido')
+                try:
+                    sql = build_create_index_sql(index_def, concurrent=True)
+                    cur.execute(sql)
+                    
+                    # Atualiza progresso de forma thread-safe
+                    with progress_lock:
+                        progress_counter['count'] += 1
+                        current = progress_counter['count']
+                        width = len(str(total))
+                        index_type = index_def.get('type', 'BTREE')
+                        print_log(f"[{current:0{width}}/{total}] ÍNDICE {index_type} CRIADO: {index_name}", level="docs")
+                    
+                    results.append((index_name, True, None))
+                    
+                except psycopg2.Error as e:
+                    with progress_lock:
+                        progress_counter['count'] += 1
+                    results.append((index_name, False, str(e)))
+            
+            cur.close()
+            
+        except Exception as e:
+            # Se falhar ao conectar, marcar todos os índices restantes como falha
+            for index_def in indexes:
+                index_name = index_def.get('name', 'desconhecido')
+                if not any(r[0] == index_name for r in results):
+                    with progress_lock:
+                        progress_counter['count'] += 1
+                    results.append((index_name, False, str(e)))
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+        
+        return results
+
+    def create_advanced_indexes(self, parallel: bool = True, max_workers: int = 4):
+        """
+        Cria índices avançados para otimização de consultas.
+        
+        Estes índices incluem:
+        - GIN (pg_trgm): Para busca textual com ILIKE '%termo%'
+        - BRIN: Para colunas de data (economia de espaço)
+        - HASH: Para lookups exatos de alta performance
+        - Índices parciais: Para subconjuntos frequentemente consultados
+        - Índices compostos: Para consultas específicas de negócio
+        
+        Args:
+            parallel: Se True, cria índices em paralelo usando múltiplas conexões.
+            max_workers: Número máximo de workers para criação paralela.
+        """
+        total = len(ADVANCED_INDEXES)
+        
+        if total == 0:
+            print_log("NENHUM ÍNDICE AVANÇADO DEFINIDO", level="warning")
+            return
+        
+        # Configurar parâmetros de performance
+        try:
+            if self.conn is None:
+                self.conn = self._connect()
+            self.conn.autocommit = True
+            cur = self.conn.cursor()
+            
+            for param, value in INDEX_CREATION_CONFIG.items():
+                cur.execute(f"SET {param} = '{value}';")
+                print_log(f"  -> {param} = {value}", level="docs")
+                
+        except psycopg2.Error as e:
+            print_log(f"AVISO: Não foi possível configurar parâmetros de performance: {e}", level="warning")
+        
+        if parallel and total > 1:
+            self._create_advanced_indexes_parallel(max_workers)
+        else:
+            self._create_advanced_indexes_sequential()
+
+    def _create_advanced_indexes_parallel(self, max_workers: int = 4):
+        """
+        Cria índices avançados em paralelo usando ThreadPoolExecutor.
+        
+        IMPORTANTE: Para evitar deadlocks, índices da MESMA TABELA são criados
+        sequencialmente, mas índices de TABELAS DIFERENTES são criados em paralelo.
+        
+        Isso porque CREATE INDEX CONCURRENTLY requer locks que podem conflitar
+        quando múltiplas conexões tentam criar índices na mesma tabela.
+        """
+        total = len(ADVANCED_INDEXES)
+        indexes_by_table = get_indexes_by_table()
+        num_tables = len(indexes_by_table)
+        effective_workers = min(max_workers, num_tables)
+        
+        print_log(f"CRIANDO {total} ÍNDICES AVANÇADOS ({num_tables} tabelas, workers={effective_workers})...", level="task")
+        
+        progress_lock = Lock()
+        progress_counter = {'count': 0}
+        errors = []
+        
+        with ThreadPoolExecutor(max_workers=effective_workers) as executor:
+            # Submete uma tarefa por TABELA (não por índice)
+            # Cada tarefa cria todos os índices da tabela sequencialmente
+            futures = {
+                executor.submit(
+                    self._create_advanced_indexes_for_table,
+                    table_name,
+                    indexes,
+                    progress_lock,
+                    progress_counter,
+                    total
+                ): table_name
+                for table_name, indexes in indexes_by_table.items()
+            }
+            
+            for future in as_completed(futures):
+                results = future.result()
+                for index_name, success, error_msg in results:
+                    if not success:
+                        errors.append(f"{index_name}: {error_msg}")
+        
+        if errors:
+            print_log(f"ÍNDICES AVANÇADOS CRIADOS COM {len(errors)} ERRO(S):", level="warning")
+            for err in errors[:5]:
+                print_log(f"  -> {err}", level="error")
+        else:
+            print_log("TODOS OS ÍNDICES AVANÇADOS FORAM CRIADOS COM SUCESSO", level="success")
+
+    def _create_advanced_indexes_sequential(self):
+        """
+        Cria índices avançados sequencialmente.
+        """
+        total = len(ADVANCED_INDEXES)
+        print_log(f"CRIANDO {total} ÍNDICES AVANÇADOS (modo sequencial)...", level="task")
+        
+        if self.conn is None:
+            self.conn = self._connect()
+        self.conn.autocommit = True
+        cur = self.conn.cursor()
+        
+        width = len(str(total))
+        errors = []
+        
+        for i, index_def in enumerate(ADVANCED_INDEXES, start=1):
+            index_name = index_def.get('name', 'desconhecido')
+            try:
+                # Modo sequencial não usa CONCURRENTLY para maior compatibilidade
+                sql = build_create_index_sql(index_def, concurrent=False)
+                cur.execute(sql)
+                index_type = index_def.get('type', 'BTREE')
+                print_log(f"[{i:0{width}}/{total}] ÍNDICE {index_type} CRIADO: {index_name}", level="docs")
+            except psycopg2.Error as e:
+                errors.append(f"{index_name}: {e}")
+                print_log(f"[{i:0{width}}/{total}] ERRO: {index_name} - {e}", level="error")
+        
+        if errors:
+            print_log(f"ÍNDICES AVANÇADOS CRIADOS COM {len(errors)} ERRO(S)", level="warning")
+        else:
+            print_log("TODOS OS ÍNDICES AVANÇADOS FORAM CRIADOS", level="success")
+
     def initialize_schema(self) -> None:
         """Executa o fluxo completo de criação do schema."""
         try:
             self._create_database()
             self.conn = self._connect()
+            self.enable_extensions()
             self.drop_tables()
             self.create_tables()
         finally:
