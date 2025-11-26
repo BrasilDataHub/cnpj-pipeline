@@ -41,7 +41,7 @@ jobs:
           fi
 
           # Update version in project
-          echo "{\"version\": \"$VERSION\", \"build\": \"$BUILD_TIMESTAMP\", \"dockerImage\": \"true\"}" > ./storage/version.json
+          echo "{\"version\": \"$VERSION\", \"build\": \"$BUILD_TIMESTAMP\", \"dockerImage\": \"true\"}" > ./data/version.json
 
           echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
           echo "BUILD_TIMESTAMP=$BUILD_TIMESTAMP" >> "$GITHUB_OUTPUT"
