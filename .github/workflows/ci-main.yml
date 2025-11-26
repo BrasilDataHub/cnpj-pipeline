@@ -11,19 +11,23 @@ on:
   workflow_dispatch:
 
 env:
+  REGISTRY: ghcr.io
   IMAGE_NAME: cnpj-etl
 
 jobs:
 
   docker-build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     outputs:
       IMAGE_TAG: ${{ steps.docker_push.outputs.IMAGE_TAG }}
       VERSION: ${{ steps.version.outputs.VERSION }}
       BUILD_TIMESTAMP: ${{ steps.version.outputs.BUILD_TIMESTAMP }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set version
         id: version
@@ -53,15 +57,17 @@ jobs:
         run: |
           docker build . --file docker/etl/Dockerfile --tag $IMAGE_NAME
 
-      - name: Login into registry
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login docker.pkg.github.com -u ${{ github.actor }} --password-stdin
+      - name: Login to GitHub Container Registry
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
 
       - name: Push Docker image
         id: docker_push
         env:
           VERSION: ${{ steps.version.outputs.VERSION }}
         run: |
-          IMAGE_ID=docker.pkg.github.com/${{ github.repository }}/$IMAGE_NAME
+          # Usar repository_owner para obter apenas o owner (organização ou usuário)
+          # Resultado: ghcr.io/brasildatahub/cnpj-etl
+          IMAGE_ID=${{ env.REGISTRY }}/${{ github.repository_owner }}/$IMAGE_NAME
 
           # Use Docker `latest` tag convention
           if [ "$VERSION" == "main" ] || [ "$VERSION" == "merge" ] || [ "$VERSION" == "edge" ]; then
