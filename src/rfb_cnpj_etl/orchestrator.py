@@ -11,7 +11,6 @@ from .db import PostgresBuilder, run_postgres_loader, carregar_tabelas_ibge
 from .utils.logger import print_log
 from .utils.zip_metadata import validate_zip_files, estimate_total_lines_from_size
 from .config import (
-    DEFAULT_ENGINE,
     DEFAULT_PARALLEL,
     DEFAULT_LOW_MEMORY,
     DOWNLOAD_DIR,
@@ -21,7 +20,6 @@ from .config import (
 
 def run_orchestrator(
         command: Optional[str] = "load",
-        engine: Optional[str] = DEFAULT_ENGINE,
         db_name: Optional[str] = POSTGRES["database"],
         month_year: Optional[str] = None,
         files_dir: Optional[str] = None,
@@ -32,7 +30,7 @@ def run_orchestrator(
         only_data: bool = False
 ):
     """
-    Orquestração da carga no banco de dados.
+    Orquestração da carga no banco de dados PostgreSQL.
 
     Comandos disponíveis:
         - init: Cria schema e tabelas
@@ -44,7 +42,6 @@ def run_orchestrator(
 
     :params:
         command: comando a ser executado.
-        engine: engine do banco de dados (apenas "postgres").
         db_name: nome do banco de dados Postgres.
         month_year: mês e ano a ser carregado ("MM/AAAA").
         files_dir: diretório com os arquivos CSV.
@@ -57,7 +54,6 @@ def run_orchestrator(
     print_log("INICIANDO TAREFAS DO BANCO DE DADOS...", level="start")
 
     estimated_lines = None
-    postgres_config = None
 
     # se for comando de carga, preparar diretórios e arquivos
     if command == "load":
@@ -90,15 +86,11 @@ def run_orchestrator(
         # estimar linhas totais para controlar o progresso
         estimated_lines = estimate_total_lines_from_size(files_dir)
 
-    # instanciar o builder adequado
-    if engine == "postgres":
-        postgres_config = POSTGRES.copy()
-        if db_name and db_name != POSTGRES["database"]:
-            postgres_config["database"] = db_name
-        builder = PostgresBuilder(config=postgres_config)
-
-    else:
-        raise ValueError(f"ENGINE NÃO SUPORTADA: {engine}")
+    # configurar conexão PostgreSQL
+    postgres_config = POSTGRES.copy()
+    if db_name and db_name != POSTGRES["database"]:
+        postgres_config["database"] = db_name
+    builder = PostgresBuilder(config=postgres_config)
 
     # =========================================================================
     # ETAPA 1: Inicialização do schema (init ou load)
@@ -151,4 +143,4 @@ def run_orchestrator(
     elif command == "load" and not only_data:
         builder.enable_foreign_keys()
 
-    print_log(f"EXECUÇÃO FINALIZADA | {engine.upper()} | {month_year}", level="done")
+    print_log(f"EXECUÇÃO FINALIZADA | POSTGRES | {month_year}", level="done")

@@ -5,7 +5,9 @@
 -- frequentemente acessadas, reduzindo drasticamente o tempo de consultas
 -- de agregação de minutos para milissegundos.
 --
--- IMPORTANTE: Executar APÓS a carga completa dos dados e criação de índices.
+-- IMPORTANTE: 
+--   - Executar APÓS a carga completa dos dados (após `db fk` ou `complete`)
+--   - Requer que as tabelas IBGE estejam populadas (ibge_estado, ibge_cidade)
 --
 -- Periodicidade de refresh recomendada:
 -- - mv_stats_estado: Diário (~2 min)

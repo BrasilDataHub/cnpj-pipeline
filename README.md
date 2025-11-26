@@ -1,6 +1,6 @@
 # rfb-cnpj-etl
 
-ETL completo dos dados públicos de CNPJ para bancos de dados relacionais.
+ETL completo dos dados públicos de CNPJ para PostgreSQL.
 
 Fonte: [Dados Abertos CNPJ - Receita Federal](https://dados.gov.br/dados/conjuntos-dados/cadastro-nacional-da-pessoa-juridica---cnpj)
 
@@ -14,10 +14,9 @@ O total de linhas (somando todas as tabelas) já está na casa dos 200 milhões.
 ## Funcionalidades
 
 - Download completo da base de dados CNPJ no site da RFB
-- Preparação e carga completa em banco de dados
+- Preparação e carga completa em banco de dados PostgreSQL
 - Criação de índices otimizados para melhorar o desempenho das consultas
 - Execução por etapas independentes (permite retomar de qualquer ponto)
-- Suporte para PostgreSQL
 
 ## Instalação
 
@@ -36,17 +35,6 @@ pip install -r requirements.txt
 > Para o `PostgreSQL`, é necessário ter o servidor instalado e configurado e definir as credenciais em variáveis
 > de ambiente ou em `config.py`.
 
-### Instalação Simplificada
-
-Se você prefere não executar os comandos manualmente, use o script de automação:
-
-```bash
-chmod +x scripts/run.sh
-./scripts/run.sh setup
-```
-
-Veja em [Scripts](./scripts/) todos os comandos disponíveis.
-
 ### Espaço necessário
 
 Cerca de 50GB:
@@ -56,72 +44,151 @@ Cerca de 50GB:
 
 > Os arquivos `.zip` são lidos diretamente, sem extração no disco, o que reduz o uso de espaço temporário.
 
-💡 **Recomenda-se ter ao menos 70 GB livres** para garantir estabilidade durante a execução, especialmente em máquinas
+**Recomenda-se ter ao menos 70 GB livres** para garantir estabilidade durante a execução, especialmente em máquinas
 com armazenamento mecânico (HDD).
 
-## Como utilizar
-
-O projeto disponibiliza comandos separados para **download** e **carga de dados**, mas também permite que essas etapas
-sejam feitas em conjunto com o comando `complete`.
-
-- Use `complete` para automatizar **todo o processo** (download + carga do mês mais recente disponível).
-- Use `download` e `db load` separadamente se quiser maior controle sobre as etapas.
-
-### `complete`
-
-Executa o ciclo completo de **download + carga** para o mês mais recente disponível.
-
-**Comportamento padrão:**
-
-- Baixa o **mês mais recente**
-- Mantém 10 downloads simultâneos
-- Salva os arquivos no diretório do projeto em `data/downloads`
-- Cria e prepara o banco de dados **PostgreSQL** configurado em `config.py`/variáveis de ambiente
-- Realiza a carga dos dados
-- Cria índices após a carga
-
-```bash
-python etl.py complete
-```
 ---
 
-### `download`
+## Referência de Comandos
 
-Baixa os arquivos `.zip` dos meses desejados da Receita Federal.  
-Este comando é utilizado internamente pelo `complete`.
-
-**Comportamento padrão:**
-
-- Baixa o **mês mais recente**
-- Salva em `data/downloads`
-- **10 downloads simultâneos**
-- **Continua** os downloads iniciados anteriormente
+### Visão Geral
 
 ```bash
+python etl.py <comando> [opções]
+```
+
+| Comando | Descrição |
+|---------|-----------|
+| `get-availables` | Lista meses disponíveis no site da RFB |
+| `get-latest` | Retorna o mês mais recente disponível |
+| `get-urls` | Exibe URLs de download para um mês |
+| `download` | Baixa arquivos ZIP da RFB |
+| `db init` | Cria schema e tabelas no banco |
+| `db load` | Carrega dados dos arquivos ZIP |
+| `db patch` | Aplica correções estáticas na base |
+| `db pk` | Adiciona chaves primárias |
+| `db index` | Cria índices |
+| `db fk` | Cria chaves estrangeiras |
+| `complete` | Executa todo o pipeline (download + carga) |
+
+---
+
+### Comandos de Consulta
+
+```bash
+# Lista todos os meses disponíveis
+python etl.py get-availables
+
+# Retorna o mês mais recente
+python etl.py get-latest
+
+# Exibe URLs de download para um mês
+python etl.py get-urls --month 11/2025
+```
+
+---
+
+### Comando `download`
+
+Baixa os arquivos ZIP de dados abertos do CNPJ diretamente do site da Receita Federal.
+
+| Flag | Tipo | Padrão | Descrição |
+|------|------|--------|-----------|
+| `--month` | `MM/AAAA` | Último mês | Mês para baixar |
+| `--download-dir` | `path` | `data/downloads` | Diretório de destino |
+| `--workers` | `int` | `10` | Downloads simultâneos |
+| `--clean` | flag | - | Remove arquivos existentes antes de baixar |
+
+```bash
+# Baixar mês mais recente
 python etl.py download
+
+# Baixar mês específico
+python etl.py download --month 11/2025
+
+# Baixar com limpeza prévia e 4 workers
+python etl.py download --month 11/2025 --clean --workers 4
 ```
 
-### `db load`
+---
 
-Realiza a carga completa dos dados `.zip` que já estejam baixados.  
-Este comando também é usado internamente por `complete`.
+### Comando `db init`
 
-**Comportamento padrão:**
+Cria o schema e as tabelas no banco de dados.
 
-- Usa o **mês mais recente**
-- Verifica se todos os arquivos `.zip` estão presentes antes de iniciar
-- Banco padrão: PostgreSQL (credenciais em `config.py` ou variáveis de ambiente)
-- Diretório de dados: `data/downloads/YYYY-MM`
-- Executa todas as etapas: carga, patches, PKs, índices e FKs
+| Flag | Tipo | Padrão | Descrição |
+|------|------|--------|-----------|
+| `--db-name` | `string` | `dados_cnpj` | Nome do banco |
 
 ```bash
-python etl.py db load
+python etl.py db init
 ```
 
-**Carregar apenas os dados (sem etapas adicionais):**
+---
+
+### Comando `db load`
+
+Carrega os dados dos arquivos ZIP para o banco de dados.
+
+| Flag | Tipo | Padrão | Descrição |
+|------|------|--------|-----------|
+| `--db-name` | `string` | `dados_cnpj` | Nome do banco |
+| `--month` | `MM/AAAA` | Último mês | Mês a ser carregado |
+| `--download-dir` | `path` | `data/downloads/YYYY-MM` | Pasta com os arquivos ZIP |
+| `--skip-index` | flag | - | Não cria índices ao final |
+| `--skip-validation` | flag | - | Ignora verificação dos arquivos |
+| `--low-memory` | flag | - | Ativa garbage collection frequente |
+| `--parallel` | flag | - | Usa multi-threading na carga |
+| `--only-data` | flag | - | Carrega apenas dados (sem patch/pk/index/fk) |
 
 ```bash
-python etl.py db load --only-data
+# Carga completa padrão
+python etl.py db load --month 11/2025
+
+# Carga apenas dados (sem extras)
+python etl.py db load --month 11/2025 --only-data
+
+# Carga com paralelismo
+python etl.py db load --month 11/2025 --parallel
+```
+
+---
+
+### Comandos `db patch`, `db pk`, `db index`, `db fk`
+
+Executam etapas específicas do processo de carga.
+
+| Flag | Tipo | Padrão | Descrição |
+|------|------|--------|-----------|
+| `--db-name` | `string` | `dados_cnpj` | Nome do banco |
+
+```bash
+python etl.py db patch    # Aplica correções estáticas
+python etl.py db pk       # Adiciona chaves primárias
+python etl.py db index    # Cria índices
+python etl.py db fk       # Cria chaves estrangeiras
+```
+
+---
+
+### Comando `complete`
+
+Executa o pipeline completo: **download + carga** em sequência.
+
+| Flag | Tipo | Padrão | Descrição |
+|------|------|--------|-----------|
+| `--month` | `MM/AAAA` | Último mês | Mês de referência |
+| `--db-name` | `string` | `dados_cnpj` | Nome do banco |
+| `--download-dir` | `path` | `data/downloads` | Diretório de download |
+| `--workers` | `int` | `10` | Downloads simultâneos |
+| `--clean` | flag | - | Remove arquivos antes de baixar |
+| `--skip-index` | flag | - | Não cria índices |
+| `--skip-validation` | flag | - | Ignora verificação dos arquivos |
+| `--low-memory` | flag | - | Ativa garbage collection |
+| `--parallel` | flag | - | Usa multi-threading |
+
+```bash
+python etl.py complete --month 11/2025 --parallel --clean
 ```
 
 ---
@@ -143,14 +210,16 @@ O ETL pode ser executado **etapa por etapa**, útil para:
 | 6 | `python etl.py db index` | Cria índices |
 | 7 | `python etl.py db fk` | Cria chaves estrangeiras |
 
-**Exemplo: Retomar a partir da criação de índices**
+**Retomar após falha:**
 
 ```bash
+# Exemplo: erro na criação de índices
+# Após corrigir, retome:
 python etl.py db index
 python etl.py db fk
 ```
 
-**Exemplo: Fluxo completo etapa por etapa**
+**Fluxo completo etapa por etapa:**
 
 ```bash
 python etl.py db init
@@ -162,28 +231,34 @@ python etl.py db index
 python etl.py db fk
 ```
 
-### Logs no terminal
+---
 
-Os logs exibem detalhadamente o progresso de cada etapa (download, validação dos arquivos, preparação do banco de dados,
-carga dos dados por arquivo, criação dos índices).
+### Ajuda
 
-Veja exemplos em [logs.md](docs/logs.md).
+```bash
+python etl.py --help
+python etl.py download --help
+python etl.py db --help
+python etl.py db load --help
+```
 
-### Outros comandos
-
-- Exemplos de uso com **todas as flags disponíveis** estão nos
-  arquivos [complete.md](docs/cli/complete.md), [download.md](docs/cli/download.md) e [db_load.md](docs/cli/db_load.md).
-
-- Utilize `python etl.py --help` para ver os comandos e argumentos disponíveis.
+---
 
 ## Personalização
 
 Todas as **constantes globais** como diretórios, downloads simultâneos, entre outras, podem ser ajustadas em
-`config.py`.
+`src/rfb_cnpj_etl/config.py`.
+
+| Variável | Descrição | Padrão |
+|----------|-----------|--------|
+| `DOWNLOAD_DIR` | Diretório de downloads | `data/downloads` |
+| `DOWNLOAD_MAX_CONCURRENTS` | Downloads simultâneos | `10` |
+| `POSTGRES` | Credenciais do PostgreSQL | `localhost:5432` |
+| `BATCH_SIZE` | Tamanho do lote de inserção | `250000` |
 
 ### Chaves primárias, estrangeiras e índices
 
-As definições de chaves primárias, estrangeiras e índices podem ser encontradas em `db/schema.py`.
+As definições de chaves primárias, estrangeiras e índices podem ser encontradas em `src/rfb_cnpj_etl/db/schema.py`.
 Edite conforme a sua necessidade.
 
 ### Scripts SQL Auxiliares (Opcionais)
@@ -240,13 +315,17 @@ psql -h localhost -U seu_usuario -d cnpj_rfb -f sql/general_improvements.sql
 - Funções: `prewarm_critical_indexes()`, `vacuum_analyze_all()`, `table_statistics()`
 - Validações: `validate_cnpj_completo()`, `check_referential_integrity()`
 
+---
+
 ## Exemplos de Consultas
 
 Para começar a explorar os dados, consulte os arquivos de exemplo abaixo. Eles contêm exemplos práticos de como utilizar
 as tabelas e colunas para extrair informações úteis, como buscar uma empresa por CNPJ, listar seus sócios ou filtrar
 estabelecimentos por cidade.
 
-- Exemplos para PostgreSQL: [query_postgres.md](docs/exemplos/query_postgres.md)
+- Exemplos para PostgreSQL: [query_postgres.md](sql/query_postgres.md)
+
+---
 
 ## Estrutura do Projeto
 
@@ -254,56 +333,49 @@ estabelecimentos por cidade.
 rfb-cnpj-etl/
 ├── src/
 │   └── rfb_cnpj_etl/
-│       ├── etl.py                      # Script principal com argparse
-│       ├── orchestrator.py             # Orquestrador de etapas
-│       ├── config.py                   # Configurações gerais e constantes
-│       ├── cnpj_data/                  # Lógica para download e scraping da base de dados CNPJ
+│       ├── main.py                    # Script principal com argparse
+│       ├── orchestrator.py            # Orquestrador de etapas
+│       ├── config.py                  # Configurações gerais e constantes
+│       ├── cnpj_data/                 # Lógica para download e scraping da base de dados CNPJ
 │       │   ├── __init__.py             
-│       │   ├── cnpj_public_data.py     # Captura os dados da RFB
-│       │   └── cnpj_downloader.py      # Gerencia o download dos arquivos
-│       ├── db/                         # Módulos para schema, carga e controle de banco
+│       │   ├── cnpj_public_data.py    # Captura os dados da RFB
+│       │   └── cnpj_downloader.py     # Gerencia o download dos arquivos
+│       ├── db/                        # Módulos para schema, carga e controle de banco
 │       │   ├── __init__.py             
-│       │   ├── postgres_builder.py     # Criação do banco de dados (PostgreSQL)
-│       │   ├── postgres_loader.py      # Carregamento dos dados no banco (PostgreSQL)
-│       │   └── schema.py               # Esquema do banco de dados (tabelas, chaves e índices)
-│       └── utils/                      # Funções utilitárias
+│       │   ├── postgres_builder.py    # Criação do banco de dados (PostgreSQL)
+│       │   ├── postgres_loader.py     # Carregamento dos dados no banco (PostgreSQL)
+│       │   ├── ibge_loader.py         # Carregamento das tabelas IBGE
+│       │   └── schema.py              # Esquema do banco de dados (tabelas, chaves e índices)
+│       └── utils/                     # Funções utilitárias
 │           ├── __init__.py
-│           ├── logger.py               # Print personalizado com hora e tempo de execução
-│           ├── progress.py             # Barra e log de progresso
-│           ├── db_transformers.py      # Transformação de dados para o banco
-│           └── db_batch_producer.py    # Geração de lotes de dados para carga
-├── sql/                                # Scripts SQL auxiliares (execução manual)
-│   ├── indexes.sql                     # Índices otimizados para buscas textuais e filtros
-│   ├── materialized_views.sql          # Views materializadas com estatísticas agregadas
-│   └── general_improvements.sql        # Extensões, funções de manutenção e validações
-├── assets/                             # Dados e arquivos auxiliares
-│   ├── cnpj-metadados.pdf              # Dicionário de Dados do Cadastro Nacional da Pessoa Jurídica
-│   ├── postgres_script.sql             # Script SQL para criação do banco de dados PostgreSQL
-│   ├── database_erd.pgerd              # Diagrama do banco de dados PostgreSQL
-│   └── postgres_erd.png                # Imagem do diagrama do banco de dados PostgreSQL
-├── data/                               # Diretório padrão para downloads
-│   └── downloads/                      # Diretório padrão para downloads
-├── docs/                               # Documentação do projeto           
-│   ├── exemplos/                       # Exemplos de consultas
-│   │   └── query_postgres.md           # Para PostgreSQL
-│   ├── cli/                            # Comandos e documentação do CLI
-│   │   ├── complete.md                 # Documentação do comando 'complete'
-│   │   ├── db_load.md                  # Documentação do comando 'db load'
-│   │   └── download.md                 # Documentação do comando 'download'
-│   └── normalizacao.md                 # Ajustes realizados nos dados carregados
-├── scripts/                            # Automação dos processos (macOS/Linux)      
-│   └── run.sh                          # Script unificado (setup, complete, download, load)
+│           ├── logger.py              # Print personalizado com hora e tempo de execução
+│           ├── progress.py            # Barra e log de progresso
+│           ├── db_transformers.py     # Transformação de dados para o banco
+│           ├── db_batch_producer.py   # Geração de lotes de dados para carga
+│           ├── db_patch.py            # Correções estáticas na base de dados
+│           ├── ibge_lookup.py         # Lookup de códigos IBGE
+│           └── zip_metadata.py        # Validação e metadados dos arquivos ZIP
+├── sql/                               # Scripts SQL auxiliares (execução manual)
+│   ├── indexes.sql                    # Índices otimizados para buscas textuais e filtros
+│   ├── materialized_views.sql         # Views materializadas com estatísticas agregadas
+│   ├── general_improvements.sql       # Extensões, funções de manutenção e validações
+│   └── query_postgres.md              # Exemplos de consultas SQL para PostgreSQL
+├── data/                              # Diretório padrão para downloads
+│   ├── downloads/                     # Arquivos ZIP baixados da RFB
+│   └── locations/                     # Dados IBGE (regiões, estados, cidades)
+├── docker/                            # Configurações Docker
+│   └── volumes/                       # Volumes persistentes
+├── etl.py                             # Wrapper para execução do CLI
+├── docker-compose.yaml                # Configuração do Docker Compose
+├── cnpj-metadados.pdf                 # Dicionário de Dados do CNPJ (Receita Federal)
+├── AGENTS.md                          # Guidelines do repositório
 ├── .gitignore
 ├── LICENSE
 ├── README.md
-└── requirements.txt                    # Dependências do projeto
+└── requirements.txt                   # Dependências do projeto
 ```
 
-- O projeto suporta apenas PostgreSQL. Para incluir um novo banco de dados (como MySQL), seria necessário:
-    - Criar o builder e o loader no diretório `db/`;
-    - Adicionar a chamada para o builder e loader no `orchestrator.py`;
-    - Ajustar `utils/db_batch_producer.py` se houver diferenças de paralelismo;
-    - Acrescentar a nova engine em **ENGINE_OPTIONS** no `config.py` e configurar as variáveis correspondentes.
+---
 
 ## Como Contribuir
 
@@ -314,4 +386,4 @@ crie um [Pull Request](https://github.com/brasildatahub/rfb-cnpj-etl/pulls).
 ## Licença
 
 Este projeto está licenciado sob os termos da licença MIT.
-Veja o arquivo [LICENSE](../../rfb-cnpj-etl/LICENSE) para mais informações.
+Veja o arquivo [LICENSE](LICENSE) para mais informações.

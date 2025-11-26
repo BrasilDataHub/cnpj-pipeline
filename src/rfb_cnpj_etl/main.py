@@ -1,10 +1,10 @@
-# etl.py
+# main.py
 
 import argparse
 from .orchestrator import run_orchestrator
 from .cnpj_data import CNPJDataScraper, CNPJDownloadManager
 from .utils.logger import print_log
-from .config import DEFAULT_PARALLEL, DEFAULT_LOW_MEMORY, DEFAULT_ENGINE, POSTGRES, ENGINE_OPTIONS
+from .config import DEFAULT_PARALLEL, DEFAULT_LOW_MEMORY, POSTGRES
 
 
 def str2bool(value):
@@ -44,12 +44,10 @@ def main() -> None:
 
     # db-init
     p_init = db_sub.add_parser("init", help="Inicializa o banco de dados")
-    p_init.add_argument("--engine", choices=ENGINE_OPTIONS, type=str, default=DEFAULT_ENGINE)
     p_init.add_argument("--db-name", type=str, help="Nome do banco Postgres", default=POSTGRES["database"])
 
     # db-load
     p_load = db_sub.add_parser("load", help="Carrega dados CSV para o banco")
-    p_load.add_argument("--engine", choices=ENGINE_OPTIONS, type=str, default=DEFAULT_ENGINE)
     p_load.add_argument("--db-name", type=str, help="Nome do banco Postgres", default=POSTGRES["database"])
     p_load.add_argument("--month", type=str)
     p_load.add_argument("--download-dir", type=str)
@@ -63,29 +61,24 @@ def main() -> None:
 
     # db-index
     p_index = db_sub.add_parser("index", help="Cria índices no banco")
-    p_index.add_argument("--engine", choices=ENGINE_OPTIONS, type=str, default=DEFAULT_ENGINE)
     p_index.add_argument("--db-name", type=str, default=POSTGRES["database"])
 
     # db-patch
     p_patch = db_sub.add_parser("patch", help="Aplica correções estáticas na base de dados")
-    p_patch.add_argument("--engine", choices=ENGINE_OPTIONS, type=str, default=DEFAULT_ENGINE)
     p_patch.add_argument("--db-name", type=str, default=POSTGRES["database"])
 
     # db-pk
     p_pk = db_sub.add_parser("pk", help="Adiciona chaves primárias nas tabelas grandes")
-    p_pk.add_argument("--engine", choices=ENGINE_OPTIONS, type=str, default=DEFAULT_ENGINE)
     p_pk.add_argument("--db-name", type=str, default=POSTGRES["database"])
 
     # db-fk
     p_fk = db_sub.add_parser("fk", help="Cria chaves estrangeiras no banco")
-    p_fk.add_argument("--engine", choices=ENGINE_OPTIONS, type=str, default=DEFAULT_ENGINE)
     p_fk.add_argument("--db-name", type=str, default=POSTGRES["database"])
 
     # complete
     p_complete = sub.add_parser("complete", help="Baixa e carrega dados automaticamente")
     p_complete.add_argument("--month", type=str)
     p_complete.add_argument("--download-dir", type=str)
-    p_complete.add_argument("--engine", choices=ENGINE_OPTIONS, type=str, default=DEFAULT_ENGINE)
     p_complete.add_argument("--db-name", type=str, default=POSTGRES["database"])
     p_complete.add_argument("--skip-index", action="store_true")
     p_complete.add_argument("--skip-validation", action="store_true")
@@ -124,7 +117,6 @@ def main() -> None:
         elif args.command == "db":
             run_orchestrator(
                 command=args.db_command,
-                engine=args.engine,
                 db_name=args.db_name,
                 month_year=getattr(args, "month", None),
                 files_dir=getattr(args, "download_dir", None),
@@ -146,11 +138,10 @@ def main() -> None:
 
             run_orchestrator(
                 command="load",
-                engine=args.engine,
                 db_name=args.db_name,
                 month_year=getattr(args, "month", None),
                 files_dir=getattr(args, "download_dir", None),
-                skip_indexes=getattr(args, "skip_indexes", False),
+                skip_indexes=getattr(args, "skip_index", False),
                 skip_validation=getattr(args, "skip_validation", False),
                 low_memory=getattr(args, "low_memory", DEFAULT_LOW_MEMORY),
                 parallel=args.parallel

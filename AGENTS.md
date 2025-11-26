@@ -4,18 +4,16 @@
 - `src/rfb_cnpj_etl/`: core package; CLI entry in `main.py`, orchestration in `orchestrator.py`, ETL helpers in `cnpj_data/`, DB logic in `db/`, shared utilities in `utils/`.
 - `etl.py`: thin wrapper that runs the CLI (`python etl.py ...`).
 - `data/`: local workspace for downloads; treat as ephemeral and do not commit.
-- `docs/`: CLI reference and usage examples; start with `docs/cli/*` and `docs/exemplos/*`.
-- `assets/`: ERD, SQL script, and reference PDFs; no code.
-- `scripts/`: Windows batch helpers for setup and execution.
+- `sql/`: auxiliary SQL scripts for indexes, materialized views, and improvements; also contains `query_postgres.md` with query examples.
 
 ## Setup, Build, and Run
 - Python 3.9+ recommended. Create a venv and install deps: `python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt`.
 - List available data months: `python etl.py get-availables`; latest month: `python etl.py get-latest`.
 - Download data: `python etl.py download --month MM/AAAA [--workers N --clean --download-dir PATH]`.
-- Initialize DB schema: `python etl.py db init [--engine postgres --db-name NAME]`.
-- Load data into DB: `python etl.py db load [--engine postgres --month MM/AAAA --download-dir PATH --skip-index --skip-validation --low-memory --parallel]`.
-- Full pipeline: `python etl.py complete [--month MM/AAAA --engine ...]` (downloads + load + indexes).
-- For flags and defaults, see `docs/cli/*.md` or `python etl.py --help`.
+- Initialize DB schema: `python etl.py db init [--db-name NAME]`.
+- Load data into DB: `python etl.py db load [--month MM/AAAA --download-dir PATH --skip-index --skip-validation --low-memory --parallel]`.
+- Full pipeline: `python etl.py complete [--month MM/AAAA ...]` (downloads + load + indexes).
+- For flags and defaults, run `python etl.py --help` or check the README.
 
 ## Coding Style & Naming
 - Python, 4-space indentation, type hints where practical.

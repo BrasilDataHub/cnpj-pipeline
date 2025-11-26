@@ -59,10 +59,8 @@ IBGE_CIDADES_CSV = IBGE_CSV_DIR / "cities.csv"
 CNPJ_DATA_URL = "https://arquivos.receitafederal.gov.br/dados/cnpj/dados_abertos_cnpj/"
 
 # ---------------------------------------------------------------------------
-# BANCO DE DADOS
+# BANCO DE DADOS (PostgreSQL)
 # ---------------------------------------------------------------------------
-ENGINE_OPTIONS = ["postgres"]  # opções de engines de banco de dados
-DEFAULT_ENGINE = "postgres"  # engine padrão de banco de dados
 DEFAULT_PARALLEL = True  # paralelismo de inserção no banco de dados
 DEFAULT_LOW_MEMORY = False  # habilita o uso de memória limitada para inserção no banco
 AVG_COMPRESSED_LINE_SIZE_BYTES = 35  # 35 bytes/linha para estimar o total de linhas e calcular o progresso da carga de dados

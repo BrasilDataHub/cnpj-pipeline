@@ -1,10 +1,13 @@
 -- =============================================================================
 -- indexes.sql - Índices Otimizados para Base CNPJ (200M+ registros)
 -- =============================================================================
--- Este script cria índices otimizados para suportar as principais consultas
--- realizadas na base de dados de CNPJ da Receita Federal do Brasil.
+-- Este script cria índices ADICIONAIS otimizados para suportar consultas
+-- avançadas na base de dados de CNPJ da Receita Federal do Brasil.
 --
--- IMPORTANTE: Executar APÓS a carga completa dos dados e VACUUM ANALYZE.
+-- IMPORTANTE: 
+--   - Executar APÓS a carga completa dos dados (após `db fk` ou `complete`)
+--   - O ETL já cria índices básicos em schema.py. Este script adiciona
+--     índices especializados para casos de uso específicos.
 --
 -- Tipos de índices utilizados:
 -- - BTREE: Índice padrão para filtros de igualdade e range
@@ -12,7 +15,7 @@
 -- - BRIN: Para colunas de data naturalmente ordenadas (economia de espaço)
 -- - HASH: Para lookups exatos de alta performance
 --
--- Espaço estimado: ~26 GB
+-- Espaço estimado: ~20 GB (adicional aos índices do ETL)
 -- Tempo estimado de criação: 30-45 minutos (com paralelismo)
 -- =============================================================================
 
@@ -37,19 +40,13 @@ SET max_parallel_maintenance_workers = 4;
 SET maintenance_work_mem = '2GB';
 
 -- =============================================================================
--- ÍNDICES: ESTABELECIMENTO - Localização
+-- ÍNDICES: ESTABELECIMENTO - Localização (complementares)
 -- =============================================================================
 \echo ''
-\echo '>>> [1/8] Criando índices de localização (estabelecimento)...'
+\echo '>>> [1/9] Criando índices de localização (estabelecimento)...'
 
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_estab_cidade_ibge 
-    ON estabelecimento (cod_cidade_ibge);
-
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_estab_estado_ibge 
-    ON estabelecimento (cod_estado_ibge);
-
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_estab_regiao_ibge 
-    ON estabelecimento (cod_regiao_ibge);
+-- Nota: idx_estab_cidade_ibge, idx_estab_estado_ibge e idx_estab_regiao_ibge
+-- já são criados pelo ETL em schema.py
 
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_estab_cep 
     ON estabelecimento (cep);
@@ -62,14 +59,12 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_estab_regiao_estado
     ON estabelecimento (cod_regiao_ibge, cod_estado_ibge);
 
 -- =============================================================================
--- ÍNDICES: ESTABELECIMENTO - CNAEs
+-- ÍNDICES: ESTABELECIMENTO - CNAEs (complementares)
 -- =============================================================================
 \echo ''
-\echo '>>> [2/8] Criando índices de CNAE (estabelecimento)...'
+\echo '>>> [2/9] Criando índices de CNAE compostos (estabelecimento)...'
 
--- CNAE principal (filtro mais usado)
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_estab_cnae_principal 
-    ON estabelecimento (cod_cnae_principal);
+-- Nota: idx_estab_cnae_principal já é criado pelo ETL em schema.py
 
 -- CNAE + Estado (consulta combinada frequente)
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_estab_cnae_estado 
@@ -80,35 +75,27 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_estab_cnae_cidade
     ON estabelecimento (cod_cnae_principal, cod_cidade_ibge);
 
 -- =============================================================================
--- ÍNDICES: ESTABELECIMENTO - Datas
+-- ÍNDICES: ESTABELECIMENTO - Datas (complementares)
 -- =============================================================================
 \echo ''
-\echo '>>> [3/8] Criando índices de datas (BRIN + BTREE)...'
+\echo '>>> [3/9] Criando índices de datas (BRIN)...'
+
+-- Nota: idx_estab_data_inicio e idx_estab_data_situacao já são criados pelo ETL
 
 -- BRIN é excelente para datas naturalmente ordenadas (economia de 95% de espaço)
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_estab_data_inicio_brin 
     ON estabelecimento USING BRIN (data_inicio_atividade) 
     WITH (pages_per_range = 32);
 
--- BTREE para consultas pontuais e ORDER BY
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_estab_data_inicio 
-    ON estabelecimento (data_inicio_atividade);
-
--- Data de situação cadastral
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_estab_data_situacao 
-    ON estabelecimento (data_situacao_cadastral);
-
 -- =============================================================================
--- ÍNDICES: ESTABELECIMENTO - Situação Cadastral / Tipo
+-- ÍNDICES: ESTABELECIMENTO - Situação Cadastral / Tipo (complementares)
 -- =============================================================================
 \echo ''
-\echo '>>> [4/8] Criando índices de situação e tipo...'
+\echo '>>> [4/9] Criando índices de situação e tipo...'
 
--- Situação cadastral (02=Ativa é ~60% dos dados)
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_estab_situacao 
-    ON estabelecimento (cod_situacao_cadastral);
+-- Nota: idx_estab_situacao já é criado pelo ETL em schema.py
 
--- Índice parcial para ATIVAS (otimiza consultas mais comuns)
+-- Índice parcial para ATIVAS (otimiza consultas mais comuns - ~60% dos dados)
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_estab_ativas 
     ON estabelecimento (cod_situacao_cadastral) 
     WHERE cod_situacao_cadastral = '02';
@@ -121,7 +108,9 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_estab_matriz_filial
 -- ÍNDICES: ESTABELECIMENTO - Busca Textual (GIN + pg_trgm)
 -- =============================================================================
 \echo ''
-\echo '>>> [5/8] Criando índices de busca textual (GIN)...'
+\echo '>>> [5/9] Criando índices de busca textual (GIN)...'
+
+-- Nota: idx_estab_nome_fantasia (BTREE) já é criado pelo ETL
 
 -- GIN trigram para ILIKE '%termo%' em nome_fantasia
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_estab_nome_fantasia_trgm 
@@ -135,7 +124,7 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_estab_nome_fantasia_prefix
 -- ÍNDICES: ESTABELECIMENTO - Contatos
 -- =============================================================================
 \echo ''
-\echo '>>> [6/8] Criando índices de contatos...'
+\echo '>>> [6/9] Criando índices de contatos...'
 
 -- Email (parcial para não-nulos - economia de espaço)
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_estab_email 
@@ -155,13 +144,10 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_estab_email_hash
 -- ÍNDICES: ESTABELECIMENTO - CNPJ Completo
 -- =============================================================================
 \echo ''
-\echo '>>> [7/8] Criando índices de CNPJ completo...'
+\echo '>>> [7/9] Criando índice HASH para CNPJ completo...'
 
--- Índice único para busca exata por CNPJ completo
-CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_estab_cnpj_completo 
-    ON estabelecimento (cnpj_completo);
-
--- Hash para lookup ultra-rápido (opcional, para consultas pontuais)
+-- Nota: cnpj_completo já é PRIMARY KEY (BTREE único implícito)
+-- Hash para lookup ultra-rápido em consultas de igualdade
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_estab_cnpj_completo_hash 
     ON estabelecimento USING HASH (cnpj_completo);
 
@@ -169,7 +155,7 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_estab_cnpj_completo_hash
 -- ÍNDICES: ESTABELECIMENTO - Compostos (Consultas Reais)
 -- =============================================================================
 \echo ''
-\echo '>>> [8/8] Criando índices compostos...'
+\echo '>>> [8/9] Criando índices compostos...'
 
 -- Combo: Estado + CNAE + Situação (consulta típica de prospecção)
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_estab_prospeccao 
@@ -193,28 +179,23 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_estab_temporal
     ON estabelecimento (cod_estado_ibge, cod_cnae_principal, data_inicio_atividade);
 
 -- =============================================================================
--- ÍNDICES: EMPRESA
+-- ÍNDICES: EMPRESA (complementares)
 -- =============================================================================
 \echo ''
-\echo '>>> Criando índices da tabela empresa...'
+\echo '>>> [9/9] Criando índices complementares...'
 
--- Porte
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_empresa_porte 
-    ON empresa (cod_porte);
-
--- Natureza jurídica
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_empresa_natureza 
-    ON empresa (cod_natureza_juridica);
+-- Nota: idx_empresa_porte, idx_empresa_natureza e idx_empresa_razao_social
+-- já são criados pelo ETL em schema.py
 
 -- Capital social (range queries)
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_empresa_capital 
     ON empresa (capital_social);
 
--- GIN trigram para razão social
+-- GIN trigram para razão social (ILIKE '%termo%')
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_empresa_razao_social_trgm 
     ON empresa USING GIN (razao_social gin_trgm_ops);
 
--- BTREE para prefixo em razão social
+-- BTREE para prefixo em razão social (autocomplete)
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_empresa_razao_social_prefix 
     ON empresa (razao_social varchar_pattern_ops);
 
@@ -224,20 +205,18 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_empresa_razao_social_prefix
 \echo ''
 \echo '>>> Criando índices da tabela estabelecimento_cnae_sec...'
 
+-- Nota: idx_estab_cnae_sec_cnpj já é criado pelo ETL em schema.py
+
 -- CNAE secundário
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_cnae_sec_cnae 
     ON estabelecimento_cnae_sec (cod_cnae);
-
--- CNPJ completo (FK para estabelecimento)
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_cnae_sec_cnpj_completo 
-    ON estabelecimento_cnae_sec (cnpj_completo);
 
 -- Covering index para CNAE secundário (evita table lookup)
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_cnae_sec_covering 
     ON estabelecimento_cnae_sec (cod_cnae) 
     INCLUDE (cnpj_completo);
 
--- CNAE secundário + localização (requer colunas desnormalizadas)
+-- CNAE secundário + localização (usa colunas desnormalizadas)
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_cnae_sec_cnae_estado 
     ON estabelecimento_cnae_sec (cod_cnae, cod_estado_ibge);
 
@@ -248,14 +227,13 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_cnae_sec_cnae_regiao
     ON estabelecimento_cnae_sec (cod_cnae, cod_regiao_ibge);
 
 -- =============================================================================
--- ÍNDICES: SÓCIO
+-- ÍNDICES: SÓCIO (complementares)
 -- =============================================================================
 \echo ''
 \echo '>>> Criando índices da tabela socio...'
 
--- CPF/CNPJ do sócio (consultas de vinculação)
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_socio_cpf_cnpj 
-    ON socio (cnpj_cpf_socio);
+-- Nota: idx_socio_empresa, idx_socio_cpf_cnpj e idx_socio_nome
+-- já são criados pelo ETL em schema.py
 
 -- Nome do sócio (busca textual com GIN trigram)
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_socio_nome_trgm 
@@ -265,32 +243,37 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_socio_nome_trgm
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_socio_nome_prefix 
     ON socio (nome_socio varchar_pattern_ops);
 
--- Empresa do sócio (JOIN)
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_socio_empresa 
-    ON socio (cnpj_basico);
-
 -- =============================================================================
 -- FINALIZAÇÃO
 -- =============================================================================
 \echo ''
 \echo '=============================================================='
-\echo 'Índices criados com sucesso!'
+\echo 'Índices adicionais criados com sucesso!'
 \echo '=============================================================='
 \echo ''
-\echo 'Resumo de índices criados:'
-\echo '  - Localização (estabelecimento): 6 índices'
-\echo '  - CNAEs: 6 índices'
-\echo '  - Datas: 3 índices'
-\echo '  - Situação/Tipo: 3 índices'
-\echo '  - Busca Textual (GIN): 5 índices'
-\echo '  - Contatos: 3 índices'
-\echo '  - CNPJ Completo: 3 índices'
-\echo '  - Compostos: 5 índices'
-\echo '  - Empresa: 5 índices'
-\echo '  - CNAEs Secundários: 7 índices'
-\echo '  - Sócios: 4 índices'
+\echo 'Este script criou índices ADICIONAIS aos já criados pelo ETL.'
 \echo ''
-\echo 'Total: ~50 índices | Espaço estimado: ~26 GB'
+\echo 'Índices adicionais criados:'
+\echo '  - Localização: 3 índices (cep, ddd, região+estado)'
+\echo '  - CNAEs compostos: 2 índices'
+\echo '  - Datas (BRIN): 1 índice'
+\echo '  - Situação/Tipo: 2 índices (ativas parcial, matriz_filial)'
+\echo '  - Busca Textual (GIN): 4 índices (nome_fantasia, razão_social, nome_socio)'
+\echo '  - Contatos: 3 índices'
+\echo '  - CNPJ Completo (HASH): 1 índice'
+\echo '  - Compostos: 5 índices (prospecção, local, novos, leads, temporal)'
+\echo '  - Empresa: 3 índices (capital, razão_social_trgm, razão_social_prefix)'
+\echo '  - CNAEs Secundários: 5 índices'
+\echo '  - Sócios: 2 índices (nome_trgm, nome_prefix)'
+\echo ''
+\echo 'Total: ~31 índices adicionais | Espaço estimado: ~20 GB'
+\echo ''
+\echo 'Índices já criados pelo ETL (schema.py):'
+\echo '  - estabelecimento: 11 índices'
+\echo '  - empresa: 4 índices'
+\echo '  - socio: 3 índices'
+\echo '  - estabelecimento_cnae_sec: 1 índice'
+\echo '  - tabelas IBGE: 4 índices'
+\echo '  - simples: 1 índice'
 \echo ''
 \timing off
-

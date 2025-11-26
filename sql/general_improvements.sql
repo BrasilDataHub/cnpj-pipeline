@@ -8,7 +8,10 @@
 -- 4. Funções utilitárias de manutenção
 -- 5. Validações de integridade
 --
--- IMPORTANTE: Este script deve ser executado em etapas conforme indicado.
+-- IMPORTANTE: 
+--   - Executar APÓS a carga completa dos dados (após `db fk` ou `complete`)
+--   - Este script deve ser executado em etapas conforme indicado
+--   - Algumas operações requerem permissões de superusuário
 -- =============================================================================
 
 \echo '=============================================================='

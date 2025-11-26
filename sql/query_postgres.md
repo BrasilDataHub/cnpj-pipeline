@@ -355,3 +355,4 @@ Os seguintes índices são criados automaticamente pelo ETL:
 3. **Use códigos IBGE para localização** - `cod_estado_ibge` e `cod_cidade_ibge` têm índices
 4. **Evite `LIKE '%termo%'** - Para buscas textuais, execute `sql/indexes.sql` para criar índices GIN
 5. **Use as Views Materializadas** - Para estatísticas agregadas, execute `sql/materialized_views.sql`
+
