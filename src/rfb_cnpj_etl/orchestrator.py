@@ -28,13 +28,22 @@ def run_orchestrator(
         skip_indexes: bool = False,
         skip_validation: bool = False,
         parallel: bool = DEFAULT_PARALLEL,
-        low_memory: bool = DEFAULT_LOW_MEMORY
+        low_memory: bool = DEFAULT_LOW_MEMORY,
+        only_data: bool = False
 ):
     """
     Orquestração da carga no banco de dados.
 
+    Comandos disponíveis:
+        - init: Cria schema e tabelas
+        - load: Carrega dados (com ou sem --only-data)
+        - patch: Aplica correções estáticas na base
+        - pk: Adiciona chaves primárias
+        - index: Cria índices
+        - fk: Cria chaves estrangeiras
+
     :params:
-        command: comando a ser executado ("load" ou "indexes").
+        command: comando a ser executado.
         engine: engine do banco de dados (apenas "postgres").
         db_name: nome do banco de dados Postgres.
         month_year: mês e ano a ser carregado ("MM/AAAA").
@@ -43,6 +52,7 @@ def run_orchestrator(
         skip_validation: se deve pular a validação dos arquivos.
         parallel: se deve usar threads para processamento.
         low_memory: se deve usar baixa memória para processamento.
+        only_data: se True, carrega apenas dados sem executar patch/pk/index/fk.
     """
     print_log("INICIANDO TAREFAS DO BANCO DE DADOS...", level="start")
 
@@ -90,12 +100,16 @@ def run_orchestrator(
     else:
         raise ValueError(f"ENGINE NÃO SUPORTADA: {engine}")
 
-    # inicializa o script_sql se for init ou load
+    # =========================================================================
+    # ETAPA 1: Inicialização do schema (init ou load)
+    # =========================================================================
     if command in ("init", "load"):
         builder.initialize_schema()
         carregar_tabelas_ibge(postgres_config=postgres_config)
 
-    # carrega os dados (somente no comando load)
+    # =========================================================================
+    # ETAPA 2: Carga dos dados (load)
+    # =========================================================================
     if command == "load":
         run_postgres_loader(
             files_dir=files_dir,
@@ -105,15 +119,36 @@ def run_orchestrator(
             low_memory=low_memory
         )
 
-    if command == 'load':
-        builder.patch_data()
+    # =========================================================================
+    # ETAPA 3: Aplicar correções estáticas (patch ou load sem --only-data)
+    # =========================================================================
+    if command == "patch":
+        builder.apply_patches()
+    elif command == "load" and not only_data:
+        builder.apply_patches()
 
-    # cria os índices (em load ou index, exceto se skip=true)
-    if command == "index" or (command == "load" and not skip_indexes):
+    # =========================================================================
+    # ETAPA 4: Criar chaves primárias (pk ou load sem --only-data)
+    # =========================================================================
+    if command == "pk":
+        builder.add_primary_keys()
+    elif command == "load" and not only_data:
+        builder.add_primary_keys()
+
+    # =========================================================================
+    # ETAPA 5: Criar índices (index ou load sem --only-data e sem --skip-index)
+    # =========================================================================
+    if command == "index":
+        builder.create_indexes()
+    elif command == "load" and not only_data and not skip_indexes:
         builder.create_indexes()
 
-    # ativa FKs apenas se for carga
-    if command == "load":
+    # =========================================================================
+    # ETAPA 6: Criar chaves estrangeiras (fk ou load sem --only-data)
+    # =========================================================================
+    if command == "fk":
+        builder.enable_foreign_keys()
+    elif command == "load" and not only_data:
         builder.enable_foreign_keys()
 
     print_log(f"EXECUÇÃO FINALIZADA | {engine.upper()} | {month_year}", level="done")

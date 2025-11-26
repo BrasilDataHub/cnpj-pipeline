@@ -15,7 +15,8 @@ O total de linhas (somando todas as tabelas) já está na casa dos 200 milhões.
 
 - Download completo da base de dados CNPJ no site da RFB
 - Preparação e carga completa em banco de dados
-- Criação de índices para melhorar o desempenho das consultas
+- Criação de índices otimizados para melhorar o desempenho das consultas
+- Execução por etapas independentes (permite retomar de qualquer ponto)
 - Suporte para PostgreSQL
 
 ## Instalação
@@ -111,10 +112,54 @@ Este comando também é usado internamente por `complete`.
 - Verifica se todos os arquivos `.zip` estão presentes antes de iniciar
 - Banco padrão: PostgreSQL (credenciais em `config.py` ou variáveis de ambiente)
 - Diretório de dados: `data/downloads/YYYY-MM`
-- Índices são criados ao final
+- Executa todas as etapas: carga, patches, PKs, índices e FKs
 
 ```bash
 python etl.py db load
+```
+
+**Carregar apenas os dados (sem etapas adicionais):**
+
+```bash
+python etl.py db load --only-data
+```
+
+---
+
+### Execução por Etapas
+
+O ETL pode ser executado **etapa por etapa**, útil para:
+- Retomar de um ponto específico após falha
+- Validar correções sem reprocessar tudo
+- Maior controle sobre o processo
+
+| Etapa | Comando | Descrição |
+|-------|---------|-----------|
+| 1 | `python etl.py db init` | Cria schema e tabelas |
+| 2 | `python etl.py download` | Baixa arquivos da RFB |
+| 3 | `python etl.py db load --only-data` | Carrega dados (sem extras) |
+| 4 | `python etl.py db patch` | Aplica correções estáticas |
+| 5 | `python etl.py db pk` | Adiciona chaves primárias |
+| 6 | `python etl.py db index` | Cria índices |
+| 7 | `python etl.py db fk` | Cria chaves estrangeiras |
+
+**Exemplo: Retomar a partir da criação de índices**
+
+```bash
+python etl.py db index
+python etl.py db fk
+```
+
+**Exemplo: Fluxo completo etapa por etapa**
+
+```bash
+python etl.py db init
+python etl.py download --month 11/2025
+python etl.py db load --only-data --month 11/2025
+python etl.py db patch
+python etl.py db pk
+python etl.py db index
+python etl.py db fk
 ```
 
 ### Logs no terminal
@@ -140,6 +185,18 @@ Todas as **constantes globais** como diretórios, downloads simultâneos, entre 
 
 As definições de chaves primárias, estrangeiras e índices podem ser encontradas em `db/schema.py`.
 Edite conforme a sua necessidade.
+
+### Scripts SQL de Otimização
+
+Na pasta `sql/` estão disponíveis scripts para otimizações avançadas:
+
+| Arquivo | Descrição |
+|---------|-----------|
+| `indexes.sql` | ~50 índices otimizados (BTREE, GIN/pg_trgm, BRIN, HASH) |
+| `materialized_views.sql` | 6 views materializadas para estatísticas agregadas |
+| `general_improvements.sql` | Extensões (pg_trgm, pg_prewarm) e funções auxiliares |
+
+Esses scripts podem ser executados manualmente após a carga para melhorias adicionais de performance.
 
 ## Benchmark de execução
 
@@ -196,6 +253,10 @@ rfb-cnpj-etl/
 │           ├── progress.py             # Barra e log de progresso
 │           ├── db_transformers.py      # Transformação de dados para o banco
 │           └── db_batch_producer.py    # Geração de lotes de dados para carga
+├── sql/                                # Scripts SQL para otimizações
+│   ├── indexes.sql                     # Índices otimizados (BTREE, GIN, BRIN, HASH)
+│   ├── materialized_views.sql          # Views materializadas para estatísticas
+│   └── general_improvements.sql        # Extensões e funções auxiliares
 ├── assets/                             # Dados e arquivos auxiliares
 │   ├── cnpj-metadados.pdf              # Dicionário de Dados do Cadastro Nacional da Pessoa Jurídica
 │   ├── postgres_script.sql             # Script SQL para criação do banco de dados PostgreSQL

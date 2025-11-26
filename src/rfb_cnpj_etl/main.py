@@ -58,11 +58,28 @@ def main() -> None:
     p_load.add_argument("--low-memory", action="store_true")
     p_load.add_argument("--parallel", type=str2bool, nargs="?", const=True,
                         default=DEFAULT_PARALLEL, help="Multithread para Postgres (True/False)")
+    p_load.add_argument("--only-data", action="store_true",
+                        help="Carrega apenas os dados, sem executar patch/pk/index/fk")
 
     # db-index
     p_index = db_sub.add_parser("index", help="Cria índices no banco")
     p_index.add_argument("--engine", choices=ENGINE_OPTIONS, type=str, default=DEFAULT_ENGINE)
     p_index.add_argument("--db-name", type=str, default=POSTGRES["database"])
+
+    # db-patch
+    p_patch = db_sub.add_parser("patch", help="Aplica correções estáticas na base de dados")
+    p_patch.add_argument("--engine", choices=ENGINE_OPTIONS, type=str, default=DEFAULT_ENGINE)
+    p_patch.add_argument("--db-name", type=str, default=POSTGRES["database"])
+
+    # db-pk
+    p_pk = db_sub.add_parser("pk", help="Adiciona chaves primárias nas tabelas grandes")
+    p_pk.add_argument("--engine", choices=ENGINE_OPTIONS, type=str, default=DEFAULT_ENGINE)
+    p_pk.add_argument("--db-name", type=str, default=POSTGRES["database"])
+
+    # db-fk
+    p_fk = db_sub.add_parser("fk", help="Cria chaves estrangeiras no banco")
+    p_fk.add_argument("--engine", choices=ENGINE_OPTIONS, type=str, default=DEFAULT_ENGINE)
+    p_fk.add_argument("--db-name", type=str, default=POSTGRES["database"])
 
     # complete
     p_complete = sub.add_parser("complete", help="Baixa e carrega dados automaticamente")
@@ -114,7 +131,8 @@ def main() -> None:
                 skip_indexes=getattr(args, "skip_index", False),
                 skip_validation=getattr(args, "skip_validation", False),
                 low_memory=getattr(args, "low_memory", DEFAULT_LOW_MEMORY),
-                parallel=args.parallel
+                parallel=getattr(args, "parallel", DEFAULT_PARALLEL),
+                only_data=getattr(args, "only_data", False)
             )
 
         elif args.command == "complete":

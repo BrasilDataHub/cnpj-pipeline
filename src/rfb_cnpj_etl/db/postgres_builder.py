@@ -126,15 +126,29 @@ class PostgresBuilder:
 
         print_log("CHAVES PRIMÁRIAS (TABELAS GRANDES) ADICIONADAS", level="success")
 
+    def apply_patches(self):
+        """
+        Aplica correções estáticas nos dados.
+        Pode ser executado independentemente via: python etl.py db patch
+        """
+        if self.conn is None:
+            self.conn = self._connect()
+        apply_static_fixes(self.conn)
+
+    def add_primary_keys(self):
+        """
+        Adiciona chaves primárias nas tabelas grandes.
+        Pode ser executado independentemente via: python etl.py db pk
+        """
+        self._add_primary_keys()
+
     def patch_data(self):
         """
-        Aplica correções estáticas nos dados e, em seguida, adiciona as
-        chaves primárias restantes (das tabelas grandes).
+        [LEGADO] Aplica correções estáticas + adiciona PKs.
+        Mantido para compatibilidade. Prefira usar apply_patches() e add_primary_keys() separadamente.
         """
-        if self.conn is None: self.conn = self._connect()
-        # A ordem original é restaurada: primeiro o patch, depois as PKs restantes.
-        apply_static_fixes(self.conn)
-        self._add_primary_keys()
+        self.apply_patches()
+        self.add_primary_keys()
 
     def enable_foreign_keys(self):
         """Cria as chaves estrangeiras definidas no SCHEMA."""
