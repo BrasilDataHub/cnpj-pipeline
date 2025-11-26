@@ -218,41 +218,6 @@ SELECT pg_stat_reset();
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-## 3.2 Configurações PostgreSQL para Carga Massiva
-
-```sql
--- postgresql.conf durante ETL (ajustar para RAM disponível)
--- Para servidor com 32GB RAM:
-
--- Memória
-shared_buffers = '8GB'              -- 25% da RAM
-effective_cache_size = '24GB'       -- 75% da RAM
-work_mem = '256MB'                  -- Alto para sorts durante index creation
-maintenance_work_mem = '2GB'        -- Crítico para CREATE INDEX
-temp_buffers = '256MB'
-
--- WAL (Write-Ahead Log) - DESABILITAR durante carga inicial
-wal_level = 'minimal'               -- Mínimo necessário
-max_wal_senders = 0                 -- Sem replicação durante carga
-synchronous_commit = 'off'          -- PERIGOSO em produção!
-wal_buffers = '64MB'
-checkpoint_timeout = '30min'
-checkpoint_completion_target = 0.9
-max_wal_size = '16GB'
-
--- Autovacuum - DESABILITAR durante carga
-autovacuum = off
-
--- Paralelismo para índices
-max_parallel_workers = 8
-max_parallel_maintenance_workers = 4
-max_worker_processes = 12
-
--- Logging reduzido
-log_statement = 'none'
-log_min_duration_statement = -1
-```
-
 ## 3.3 Script de Criação Otimizada de Tabelas
 
 ```sql
@@ -1420,82 +1385,6 @@ WHERE e.cnpj_completo = '12345678000100';
 
 ---
 
-# 8. Operação Híbrida Mac/Ubuntu (NVMe + Postgres em container)
-
-## 8.1 Perfis de hardware e implicações
-
-| Ambiente | CPU | RAM disponível | Armazenamento | Observações |
-|----------|-----|----------------|---------------|-------------|
-| **Local (MacBook Pro M3 Pro)** | 11‑12 núcleos de performance + eficiência | 18 GB | NVMe interno | Alta largura de banda single-thread, thermal throttling moderado, permite buffers maiores. |
-| **Produção (Ubuntu + Redsnet)** | 8vCPU (x86) | 8 GB | NVMe dedicado | Mais estável sob carga contínua, porém memória é o gargalo; o container do Postgres compartilha a mesma RAM. |
-
-**Premissas-chave**
-- Ambos os ambientes usam **o mesmo stack** (Python + Postgres em container), logo o código precisa apenas **expor ajustes parametrizáveis**, e não ifs específicos de SO.
-- O gargalo muda conforme o ambiente: no Mac o custo é CPU/GIL e serialização para o `COPY`; no Ubuntu o custo é RAM e concorrência com o Postgres.
-- Os dois utilizam NVMe, então otimizações de disco focam em **acessar menos dados simultâneos** ao invés de priorizar caching.
-
-## 8.2 Ajustes recomendados no código Python
-
-### 1. Transformação fora da etapa de leitura
-`utils/db_batch_producer.py` chama `transform_batch` ainda dentro do produtor antes de enfileirar (`transform_batch(item, sanitizer_func)` nas linhas 88 e 106). Ao mover essa transformação para `postgres_loader.consume_batches` (antes de `convert_rows_to_csv_buffer`) é possível:
-- usar o poder de CPU do Mac (mais threads consumidores concorrentes);
-- aliviar o servidor Ubuntu (produtor mantém batches menores e empurra o trabalho pesado para no máximo `WORKER_THREADS` consumidores);
-- evitar múltiplas cópias da mesma lista na RAM.
-
-### 2. Lotes elásticos
-`config.BATCH_SIZE` é um valor global de 250 mil linhas, e `QUEUE_SIZE` depende apenas de `cpu_count()`. Introduza um _helper_ que calcule ambos em runtime:
-
-```
-target_mem_gb = psutil.virtual_memory().total / 1e9
-if target_mem_gb <= 8:
-    batch_size = 120_000
-    queue_size = 2 * workers
-else:
-    batch_size = 400_000
-    queue_size = 4 * workers
-```
-
-Esse ajuste mantém o Mac sempre alimentado (menos commits/fsync) e evita estourar a RAM do servidor. O valor atual pode continuar como padrão para ambientes desconhecidos, mas permitir override via `ETL_BATCH_SIZE` / `ETL_QUEUE_SIZE` (variáveis de ambiente simples de ler em `config.py`).
-
-### 3. Concorrência controlada
-`WORKER_THREADS = cpu_count() - 1` pode gerar até 11 conexões no Mac (cada uma com `maintenance_work_mem` + buffers). Define um limite superior de 6 consumidores e inferior de 2. O servidor Ubuntu deve rodar com 3 threads (garante espaço para o próprio Postgres e para o processo Docker). Exponha esse limite via `ETL_MAX_WORKERS` para alinhar ambientes sem alteração de código.
-
-### 4. Reuso de buffers de COPY
-`convert_rows_to_csv_buffer` cria `StringIO` + `BytesIO` a cada batch. Reaproveitar o `StringIO` (limpando com `seek(0); truncate(0)`) reduz o overhead de GC, especialmente no Mac que consegue rodar batches maiores por vez. Combine com a flag `low_memory` para decidir se os buffers serão reaproveitados ou recriados.
-
-### 5. Sanitização incremental
-`sanitize_for_postgres` percorre todas as colunas antes de qualquer filtro. Converter isso para um gerador (yield por linha) reduz picos de memória e deixa o servidor Ubuntu menos pressionado. O Mac continua se beneficiando por conseguir sanitizar mais linhas/segundo.
-
-### 6. Controle fino do pipeline
-- `produce_batches(... parallel=True)` cria até 4 _threads_ produtoras; permita regular esse valor (`ETL_MAX_PRODUCERS`). No Mac use 4 para aproveitar a largura de banda do NVMe; no Ubuntu limite a 2 para reduzir contexto.
-- Continue usando `--low-memory` quando rodar no Ubuntu e mantenha `parallel=True` no Mac. As duas flags já existem em `orchestrator.run_orchestrator`, basta documentar o perfil recomendado.
-
-### 7. Criação de índices paralela e consciente
-`PostgresBuilder.create_indexes()` executa sequencialmente. Encapsular a criação em uma `ThreadPoolExecutor` (máx. 4 no Mac, 2 no Ubuntu) com `CREATE INDEX CONCURRENTLY` permite aproveitar ambos ambientes sem alterar Docker. A função pode receber `max_workers` via env `ETL_INDEX_WORKERS`.
-
-## 8.3 Parâmetros sugeridos por ambiente
-
-| Parâmetro | Mac (18 GB) | Ubuntu (8 GB) | Implementação sugerida |
-|-----------|-------------|---------------|------------------------|
-| `BATCH_SIZE` | 400 000 linhas (estabelecimento com `ratio=0.4` = 160 k) | 120 000 (estab ≈ 48 k) | Calcular dinamicamente lendo `ETL_BATCH_SIZE` ou usando heurística por RAM. |
-| `WORKER_THREADS` | 5-6 | 3 | Limitar via `min(max(cpu_count()-1, 2), ETL_MAX_WORKERS)`. |
-| `QUEUE_SIZE` | `workers * 4` | `workers * 2` | Ajustar após computar `workers`. |
-| Produtores (`produce_batches`) | 4 threads | 2 threads | Expor `ETL_MAX_PRODUCERS`. |
-| Flag `low_memory` | `False` | `True` | Usar argumento CLI `--low-memory` no Ubuntu. |
-| Criação de índices | Paralelo (`max_workers=4`) | Paralelo (`max_workers=2`) | Aplicar no `PostgresBuilder`. |
-| `maintenance_work_mem` (SQL) | 3 GB temporário | 1 GB temporário | Já documentado; alinhar com recursos disponíveis (Postgres em container). |
-
-## 8.4 Passos práticos de implementação
-1. **Parâmetros dinâmicos**: ler variáveis de ambiente (`ETL_BATCH_SIZE`, `ETL_MAX_WORKERS`, `ETL_MAX_PRODUCERS`, `ETL_QUEUE_SIZE`) em `config.py` com _fallback_ para a heurística por RAM (via `psutil`).
-2. **Split transformação/inserção**: mover `transform_batch` para os consumidores e enfileirar apenas as linhas brutas, reduzindo cópias e liberando CPU no Mac.
-3. **Buffer pooling**: introduzir um pequeno _pool_ de `BytesIO`/`StringIO` (lista simples) quando `low_memory=False`; no Ubuntu, manter o comportamento atual para evitar retenção.
-4. **Monitoramento**: registrar métricas simples (tempo por batch, tempo de COPY, média de memória) com `utils.logger.print_log`. Isso facilita comparar execuções entre ambientes e ajustar os env vars conforme necessário.
-5. **Documentar perfis**: adicionar ao README/CLI a tabela acima explicando como exportar os env vars antes de executar `python etl.py complete ...`.
-
-Com essas alterações o mesmo código Python se adapta automaticamente aos dois cenários, explorando o poder de CPU/RAM do Mac para acelerar desenvolvimentos e garantindo que a execução no servidor (mais limitado em memória) mantenha estabilidade e previsibilidade.
-
----
-
 # Anexo A: Scripts SQL Completos
 
 ## A.1 Script de Criação de Índices
@@ -1720,28 +1609,6 @@ def compute_cnpj_completo(rows: List[List], columns: List[str]) -> List[List]:
         Input:  cnpj_basico='12345678', cnpj_ordem='0001', cnpj_dv='00'
         Output: cnpj_completo='12345678000100'
     """
-    # Encontrar índices das colunas CNPJ
-    try:
-        idx_basico = columns.index('cnpj_basico')
-        idx_ordem = columns.index('cnpj_ordem')
-        idx_dv = columns.index('cnpj_dv')
-        idx_completo = columns.index('cnpj_completo')
-    except ValueError as e:
-        raise ValueError(f"Coluna CNPJ não encontrada no schema: {e}")
-    
-    new_rows = []
-    for row in rows:
-        row = list(row)
-        
-        # Garantir que os valores são strings e preencher com zeros à esquerda se necessário
-        basico = str(row[idx_basico] or '').strip().zfill(8)[:8]
-        ordem = str(row[idx_ordem] or '').strip().zfill(4)[:4]
-        dv = str(row[idx_dv] or '').strip().zfill(2)[:2]
-        
-        # Concatenar e garantir exatamente 14 caracteres
-        cnpj_completo = (basico + ordem + dv).ljust(14, '0')[:14]
-        row[idx_completo] = cnpj_completo
-        new_rows.append(row)
     
     return new_rows
 
@@ -1784,44 +1651,4 @@ def transform_batch(item: dict, sanitizer_func: Callable) -> List:
         rows = normalize_dates(rows, columns, ["data_entrada_sociedade"])
 
     return rows
-```
-
-## B.2 IBGELookup com __slots__
-
-```python
-# utils/ibge_lookup_optimized.py
-
-class IBGERecord:
-    """Record otimizado com __slots__ para economia de memória."""
-    __slots__ = ('cod', 'nome', 'extra')
-    
-    def __init__(self, cod, nome, extra=None):
-        self.cod = cod
-        self.nome = nome
-        self.extra = extra
-
-
-class OptimizedIBGELookup:
-    """
-    Lookup IBGE otimizado para 200M+ operações.
-    Usa arrays densos ao invés de dicts quando possível.
-    """
-    
-    def __init__(self):
-        # Estados: array indexado por código (11-53)
-        self._estados = [None] * 54  # índice direto
-        # Cidades: dict com SIAFI como chave (mais esparso)
-        self._cidades = {}
-        # Cache de UF -> código estado
-        self._uf_to_cod = {}
-        
-    def get_estado(self, cod_estado: int):
-        """O(1) lookup direto no array."""
-        if 11 <= cod_estado <= 53:
-            return self._estados[cod_estado]
-        return None
-    
-    def get_cidade_by_siafi(self, siafi: str):
-        """O(1) lookup no dict."""
-        return self._cidades.get(siafi) or self._cidades.get(siafi.lstrip('0'))
 ```

@@ -25,13 +25,11 @@ SCHEMA = {
     },
     'municipio_rfb': {
         'source_file_stem': 'Municipios',
+        # NOTA: O arquivo Municipios.zip da RFB possui apenas 2 colunas: cod_municipio e nome_municipio.
+        # A coluna uf NÃO existe no arquivo original.
         'columns': [
             ('cod_municipio', 'VARCHAR(7) PRIMARY KEY'),
-            ('nome_municipio', 'VARCHAR(120) NOT NULL'),
-            ('uf', 'VARCHAR(2)')
-        ],
-        'indexes': [
-            {'name': 'idx_municipio_rfb_uf', 'columns': ['uf']}
+            ('nome_municipio', 'VARCHAR(120) NOT NULL')
         ]
     },
     'ibge_regiao': {
@@ -134,6 +132,7 @@ SCHEMA = {
             ('cnpj_basico', 'VARCHAR(8) NOT NULL'),
             ('cnpj_ordem', 'VARCHAR(4) NOT NULL'),
             ('cnpj_dv', 'VARCHAR(2) NOT NULL'),
+            ('cnpj_completo', 'CHAR(14) NOT NULL'),  # Computado no Python durante carga
             ('matriz_filial', 'VARCHAR(1) NOT NULL'),
             ('nome_fantasia', 'VARCHAR(60)'),
             ('cod_situacao_cadastral', 'VARCHAR(2) NOT NULL'),
@@ -241,7 +240,13 @@ SCHEMA = {
             ('cnpj_basico', 'VARCHAR(8) NOT NULL'),
             ('cnpj_ordem', 'VARCHAR(4) NOT NULL'),
             ('cnpj_dv', 'VARCHAR(2) NOT NULL'),
-            ('cod_cnae', 'VARCHAR(7) NOT NULL')
+            ('cnpj_completo', 'CHAR(14) NOT NULL'),  # Computado no Python durante carga
+            ('cod_cnae', 'VARCHAR(7) NOT NULL'),
+            # Colunas desnormalizadas para evitar JOINs custosos
+            ('cod_regiao_ibge', 'SMALLINT'),
+            ('cod_estado_ibge', 'SMALLINT'),
+            ('cod_cidade_ibge', 'INTEGER'),
+            ('data_inicio_atividade', 'DATE')
         ],
         'foreign_keys': [
             {'columns': ['cnpj_basico', 'cnpj_ordem', 'cnpj_dv'],

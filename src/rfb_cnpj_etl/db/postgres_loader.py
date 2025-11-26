@@ -2,9 +2,10 @@
 
 import gc
 import psycopg2
+from contextlib import contextmanager
 from queue import Queue
 from threading import Thread, Lock
-from typing import Optional, Any, Dict
+from typing import Optional, Any, Dict, Generator
 from ..config import QUEUE_SIZE, WORKER_THREADS, DEBUG_LOG
 from ..utils.logger import print_log
 from ..utils.progress import pbar, update_progress
@@ -12,74 +13,92 @@ from ..utils.db_batch_producer import produce_batches
 from ..utils.db_transformers import convert_rows_to_csv_buffer
 
 
+@contextmanager
+def get_connection(config: dict) -> Generator[psycopg2.extensions.connection, None, None]:
+    """
+    Context manager para conexão PostgreSQL.
+    Garante fechamento da conexão mesmo em caso de erro.
+    """
+    conn = None
+    try:
+        conn = psycopg2.connect(**config)
+        conn.set_client_encoding("WIN1252")
+        conn.autocommit = False
+        yield conn
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
 def consume_batches(insertion_queue, postgres_config: dict, thread_id: int,
                     progress_lock, shared_progress, low_memory: bool, total_records: int):
     """
     Função para consumir lotes de dados da fila de inserção e inserir no banco de dados PostgreSQL.
+    Utiliza context manager para garantir fechamento da conexão mesmo em caso de erro.
     """
     try:
-        conn = psycopg2.connect(**postgres_config)
-        conn.set_client_encoding("WIN1252")
-        conn.autocommit = False
-        cur = conn.cursor()
+        with get_connection(postgres_config) as conn:
+            cur = conn.cursor()
 
-        while True:
-            item = insertion_queue.get()
-            if item is None:
+            while True:
+                item = insertion_queue.get()
+                if item is None:
+                    insertion_queue.task_done()
+                    break
+
+                rows = item["rows"]
+
+                if not rows:
+                    insertion_queue.task_done()
+                    continue
+
+                table = item["table"]
+                columns = item["columns"]
+
+                buffer = None
+                try:
+                    buffer = convert_rows_to_csv_buffer(rows)
+                    copy_sql = f'COPY "{table}" ({",".join(columns)}) FROM STDIN WITH (FORMAT csv, DELIMITER \';\', NULL \'\')'
+                    cur.copy_expert(copy_sql, buffer)
+                    conn.commit()
+
+                except psycopg2.Error as db_error:
+                    conn.rollback()
+                    pg_error_message = db_error.pgerror
+                    pg_code = db_error.pgcode
+                    print_log(f"ERRO DE DB INSERINDO EM '{table}': {pg_error_message} (Código: {pg_code})"
+                              f" ARQUIVO: {item['filename']}",
+                              level="error")
+
+                except Exception as e:
+                    print_log(f"ERRO INSERINDO EM '{table}': {e}"
+                              f"ARQUIVO: {item['filename']}",
+                              level="error")
+
+                finally:
+                    if buffer:
+                        buffer.close()
+
+                if table != 'estabelecimento_cnae_sec':
+                    update_progress(
+                        rows_inserted=len(rows),
+                        filename=item['filename'],
+                        insertion_queue=insertion_queue,
+                        queue_size_max=QUEUE_SIZE,
+                        shared=shared_progress,
+                        lock=progress_lock,
+                        total=total_records,
+                        debug=DEBUG_LOG
+                    )
+
                 insertion_queue.task_done()
-                break
+                if low_memory:
+                    gc.collect()
 
-            rows = item["rows"]
-
-            if not rows:
-                insertion_queue.task_done()
-                continue
-
-            table = item["table"]
-            columns = item["columns"]
-
-            buffer = None
-            try:
-                buffer = convert_rows_to_csv_buffer(rows)
-                copy_sql = f'COPY "{table}" ({",".join(columns)}) FROM STDIN WITH (FORMAT csv, DELIMITER \';\', NULL \'\')'
-                cur.copy_expert(copy_sql, buffer)
-                conn.commit()
-
-            except psycopg2.Error as db_error:
-                conn.rollback()
-                pg_error_message = db_error.pgerror
-                pg_code = db_error.pgcode
-                print_log(f"ERRO DE DB INSERINDO EM '{table}': {pg_error_message} (Código: {pg_code})"
-                          f" ARQUIVO: {item['filename']}",
-                          level="error")
-
-            except Exception as e:
-                print_log(f"ERRO INSERINDO EM '{table}': {e}"
-                          f"ARQUIVO: {item['filename']}",
-                          level="error")
-
-            finally:
-                if buffer:
-                    buffer.close()
-
-            if table != 'estabelecimento_cnae_sec':
-                update_progress(
-                    rows_inserted=len(rows),
-                    filename=item['filename'],
-                    insertion_queue=insertion_queue,
-                    queue_size_max=QUEUE_SIZE,
-                    shared=shared_progress,
-                    lock=progress_lock,
-                    total=total_records,
-                    debug=DEBUG_LOG
-                )
-
-            insertion_queue.task_done()
-            if low_memory:
-                gc.collect()
-
-        cur.close()
-        conn.close()
+            cur.close()
 
     except Exception as fatal:
         print_log(f"[THREAD-{thread_id}] ERRO FATAL: {fatal}", level="error")

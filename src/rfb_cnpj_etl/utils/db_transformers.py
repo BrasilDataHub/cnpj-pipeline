@@ -13,6 +13,50 @@ from .ibge_lookup import IBGELookup
 IBGE_LOOKUP = IBGELookup()
 
 
+def compute_cnpj_completo(rows: List[List], columns: List[str]) -> List[List]:
+    """
+    Computa cnpj_completo concatenando cnpj_basico + cnpj_ordem + cnpj_dv.
+
+    Esta função deve ser chamada durante o processo de transformação,
+    ANTES do COPY para o banco de dados.
+
+    Args:
+        rows: Lista de linhas (cada linha é uma lista de valores)
+        columns: Lista com os nomes das colunas na ordem correspondente
+
+    Returns:
+        Lista de linhas com cnpj_completo preenchido
+
+    Exemplo:
+        Input:  cnpj_basico='12345678', cnpj_ordem='0001', cnpj_dv='00'
+        Output: cnpj_completo='12345678000100'
+    """
+    # Encontrar índices das colunas CNPJ
+    try:
+        idx_basico = columns.index('cnpj_basico')
+        idx_ordem = columns.index('cnpj_ordem')
+        idx_dv = columns.index('cnpj_dv')
+        idx_completo = columns.index('cnpj_completo')
+    except ValueError:
+        # Se alguma coluna não existir, retorna rows sem modificação
+        return rows
+
+    new_rows = []
+    for row in rows:
+        row = list(row)
+        # Garantir que os valores são strings e preencher com zeros à esquerda se necessário
+        basico = str(row[idx_basico] or '').zfill(8)
+        ordem = str(row[idx_ordem] or '').zfill(4)
+        dv = str(row[idx_dv] or '').zfill(2)
+
+        # Concatenar e garantir exatamente 14 caracteres
+        cnpj_completo = (basico + ordem + dv)[:14].ljust(14, '0')
+        row[idx_completo] = cnpj_completo
+        new_rows.append(row)
+
+    return new_rows
+
+
 def sanitize_for_postgres(rows: List[List[Any]]) -> List[List[Any]]:
     """Sanitiza para bancos de dados com encoding 'windows-1252'."""
     cleaned_rows = []
@@ -90,6 +134,12 @@ def convert_rows_to_csv_buffer(rows: List[List[Union[str, int, float, None]]]) -
 def transform_batch(item: dict, sanitizer_func: Callable) -> List:
     """
     Aplica todas as transformações necessárias a um lote de dados.
+
+    Ordem de transformações:
+    1. Sanitização (limpeza de caracteres inválidos)
+    2. Normalização de datas e valores numéricos
+    3. Enriquecimento IBGE (para estabelecimento)
+    4. Computação de cnpj_completo (para estabelecimento e estabelecimento_cnae_sec)
     """
     table = item["table"]
     columns = item["columns"]
@@ -105,6 +155,17 @@ def transform_batch(item: dict, sanitizer_func: Callable) -> List:
             "data_situacao_cadastral", "data_inicio_atividade", "data_situacao_especial"
         ])
         rows = IBGE_LOOKUP.append_ibge_to_estabelecimentos(rows, columns)
+        # Computar CNPJ completo ANTES do COPY
+        if 'cnpj_completo' in columns:
+            rows = compute_cnpj_completo(rows, columns)
+
+    elif table == "estabelecimento_cnae_sec":
+        # Normaliza data_inicio_atividade
+        if 'data_inicio_atividade' in columns:
+            rows = normalize_dates(rows, columns, ["data_inicio_atividade"])
+        # Computar CNPJ completo para CNAEs secundários
+        if 'cnpj_completo' in columns:
+            rows = compute_cnpj_completo(rows, columns)
 
     elif table == "simples":
         rows = normalize_dates(

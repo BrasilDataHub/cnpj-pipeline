@@ -5,6 +5,8 @@ Módulo para construção do banco de dados PostgreSQL.
 """
 
 import psycopg2
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
 from ..db.schema import SCHEMA
 from ..utils.db_patch import apply_static_fixes
 from ..utils.logger import print_log
@@ -182,14 +184,75 @@ class PostgresBuilder:
             print_log(f"ERRO AO CRIAR FKs: {e}", level="error")
             raise
 
-    def create_indexes(self):
-        """Cria os índices definidos no SCHEMA."""
+    def _create_indexes_for_table(self, table_name: str, indexes: list, 
+                                    progress_lock: Lock, progress_counter: dict, 
+                                    total: int) -> list:
+        """
+        Cria todos os índices de uma tabela SEQUENCIALMENTE usando uma conexão dedicada.
+        Isso evita deadlocks que ocorrem quando múltiplas conexões tentam criar
+        índices na mesma tabela com CREATE INDEX CONCURRENTLY.
+        
+        Returns:
+            list: Lista de tuplas (index_name, success: bool, error_msg: str or None)
+        """
+        results = []
+        conn = None
+        
         try:
-            print_log("CRIANDO ÍNDICES...", level="task")
-            if self.conn is None: self.conn = self._connect()
-            self.conn.autocommit = True
-            cur = self.conn.cursor()
+            # Uma conexão por tabela
+            conn = self._connect()
+            conn.autocommit = True
+            cur = conn.cursor()
+            
+            for index in indexes:
+                index_name = index.get('name', 'desconhecido')
+                try:
+                    index_cols = ', '.join(f'"{col}"' for col in index['columns'])
+                    # Usa CREATE INDEX CONCURRENTLY para não bloquear outras operações
+                    stmt = f'CREATE INDEX CONCURRENTLY IF NOT EXISTS "{index_name}" ON public."{table_name}" ({index_cols});'
+                    cur.execute(stmt)
+                    
+                    # Atualiza progresso de forma thread-safe
+                    with progress_lock:
+                        progress_counter['count'] += 1
+                        current = progress_counter['count']
+                        width = len(str(total))
+                        print_log(f"[{current:0{width}}/{total}] ÍNDICE CRIADO: {index_name}", level="docs")
+                    
+                    results.append((index_name, True, None))
+                    
+                except (psycopg2.Error, KeyError) as e:
+                    with progress_lock:
+                        progress_counter['count'] += 1
+                    results.append((index_name, False, str(e)))
+            
+            cur.close()
+            
+        except Exception as e:
+            # Se falhar ao conectar, marcar todos os índices como falha
+            for index in indexes:
+                index_name = index.get('name', 'desconhecido')
+                with progress_lock:
+                    progress_counter['count'] += 1
+                results.append((index_name, False, str(e)))
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+        
+        return results
 
+    def create_indexes(self, parallel: bool = True, max_workers: int = 4):
+        """
+        Cria os índices definidos no SCHEMA.
+        
+        Args:
+            parallel: Se True, cria índices em paralelo usando múltiplas conexões.
+            max_workers: Número máximo de workers para criação paralela.
+        """
+        try:
             all_indexes = []
             for table_name, definition in SCHEMA.items():
                 if 'indexes' in definition:
@@ -197,22 +260,97 @@ class PostgresBuilder:
                         all_indexes.append((table_name, index))
 
             total = len(all_indexes)
-            width = len(str(total))
-            for i, (table_name, index) in enumerate(all_indexes, start=1):
-                index_name = "desconhecido"
-                try:
-                    index_name = index['name']
-                    index_cols = ', '.join(f'"{col}"' for col in index['columns'])
-                    stmt = f'CREATE INDEX IF NOT EXISTS "{index_name}" ON public."{table_name}" ({index_cols});'
-                    cur.execute(stmt)
-                    print_log(f"[{i:0{width}}/{total}] ÍNDICE CRIADO: {index_name}", level="docs")
-                except (psycopg2.Error, KeyError) as e:
-                    print_log(f"Erro ao criar índice {index_name}: {e}", level="error")
-
-            print_log("TODOS OS ÍNDICES FORAM CRIADOS", level="success")
-        except psycopg2.Error as e:
+            
+            if parallel and total > 1:
+                self._create_indexes_parallel(all_indexes, max_workers)
+            else:
+                self._create_indexes_sequential(all_indexes)
+                
+        except Exception as e:
             print_log(f"ERRO AO CRIAR ÍNDICES: {e}", level="error")
             raise
+
+    def _create_indexes_parallel(self, all_indexes: list, max_workers: int = 4):
+        """
+        Cria índices em paralelo usando ThreadPoolExecutor.
+        
+        IMPORTANTE: Para evitar deadlocks, índices da MESMA TABELA são criados
+        sequencialmente, mas índices de TABELAS DIFERENTES são criados em paralelo.
+        
+        Isso porque CREATE INDEX CONCURRENTLY requer locks que podem conflitar
+        quando múltiplas conexões tentam criar índices na mesma tabela.
+        """
+        total = len(all_indexes)
+        
+        # Agrupar índices por tabela
+        indexes_by_table = {}
+        for table_name, index in all_indexes:
+            if table_name not in indexes_by_table:
+                indexes_by_table[table_name] = []
+            indexes_by_table[table_name].append(index)
+        
+        num_tables = len(indexes_by_table)
+        effective_workers = min(max_workers, num_tables)
+        
+        print_log(f"CRIANDO {total} ÍNDICES ({num_tables} tabelas, workers={effective_workers})...", level="task")
+        
+        progress_lock = Lock()
+        progress_counter = {'count': 0}
+        errors = []
+        
+        with ThreadPoolExecutor(max_workers=effective_workers) as executor:
+            # Submete uma tarefa por TABELA (não por índice)
+            # Cada tarefa cria todos os índices da tabela sequencialmente
+            futures = {
+                executor.submit(
+                    self._create_indexes_for_table,
+                    table_name,
+                    indexes,
+                    progress_lock, 
+                    progress_counter, 
+                    total
+                ): table_name
+                for table_name, indexes in indexes_by_table.items()
+            }
+            
+            for future in as_completed(futures):
+                results = future.result()
+                for index_name, success, error_msg in results:
+                    if not success:
+                        errors.append(f"{index_name}: {error_msg}")
+        
+        if errors:
+            print_log(f"ÍNDICES CRIADOS COM {len(errors)} ERRO(S):", level="warning")
+            for err in errors[:5]:  # Mostra no máximo 5 erros
+                print_log(f"  -> {err}", level="error")
+        else:
+            print_log("TODOS OS ÍNDICES FORAM CRIADOS COM SUCESSO", level="success")
+
+    def _create_indexes_sequential(self, all_indexes: list):
+        """
+        Cria índices sequencialmente (fallback para quando paralelo não é desejado).
+        """
+        total = len(all_indexes)
+        print_log(f"CRIANDO {total} ÍNDICES (modo sequencial)...", level="task")
+        
+        if self.conn is None: 
+            self.conn = self._connect()
+        self.conn.autocommit = True
+        cur = self.conn.cursor()
+
+        width = len(str(total))
+        for i, (table_name, index) in enumerate(all_indexes, start=1):
+            index_name = "desconhecido"
+            try:
+                index_name = index['name']
+                index_cols = ', '.join(f'"{col}"' for col in index['columns'])
+                stmt = f'CREATE INDEX IF NOT EXISTS "{index_name}" ON public."{table_name}" ({index_cols});'
+                cur.execute(stmt)
+                print_log(f"[{i:0{width}}/{total}] ÍNDICE CRIADO: {index_name}", level="docs")
+            except (psycopg2.Error, KeyError) as e:
+                print_log(f"Erro ao criar índice {index_name}: {e}", level="error")
+
+        print_log("TODOS OS ÍNDICES FORAM CRIADOS", level="success")
 
     def initialize_schema(self) -> None:
         """Executa o fluxo completo de criação do schema."""
