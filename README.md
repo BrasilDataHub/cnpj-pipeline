@@ -17,8 +17,35 @@ O total de linhas (somando todas as tabelas) já está na casa dos 200 milhões.
 - Preparação e carga completa em banco de dados PostgreSQL
 - Criação de índices otimizados para melhorar o desempenho das consultas
 - Execução por etapas independentes (permite retomar de qualquer ponto)
+- **Suporte a Docker** para execução portátil em qualquer ambiente
 
 ## Instalação
+
+Escolha uma das opções abaixo:
+
+### Opção 1: Docker (Recomendado)
+
+A forma mais simples de executar o ETL, sem necessidade de instalar Python ou PostgreSQL localmente.
+
+```bash
+# Clone o projeto
+git clone https://github.com/brasildatahub/rfb-cnpj-etl.git
+cd rfb-cnpj-etl
+
+# Configure as variáveis de ambiente
+cp .env.example .env
+# Edite o arquivo .env com suas configurações
+
+# Suba o PostgreSQL
+docker compose up -d postgres
+
+# Execute o pipeline completo
+docker compose run --rm etl complete --month 11/2025 --parallel
+```
+
+> Requer [Docker](https://docs.docker.com/get-docker/) e [Docker Compose](https://docs.docker.com/compose/install/) instalados.
+
+### Opção 2: Instalação Local
 
 Clone o projeto, crie o ambiente virtual e instale os requisitos com:
 
@@ -49,12 +76,87 @@ com armazenamento mecânico (HDD).
 
 ---
 
+## Execução com Docker
+
+O projeto inclui suporte completo a Docker, permitindo executar o ETL de forma portátil em qualquer ambiente
+(local, servidor, cloud). Os arquivos baixados são persistidos no host através de volumes mapeados.
+
+### Configuração
+
+```bash
+# Copie o arquivo de exemplo e configure
+cp .env.example .env
+```
+
+Edite o arquivo `.env` com suas configurações:
+
+```env
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=sua_senha_segura
+POSTGRES_DBNAME=dados_cnpj
+```
+
+### Comandos Docker
+
+```bash
+# Subir apenas o PostgreSQL
+docker compose up -d postgres
+
+# Pipeline completo (download + carga + índices)
+docker compose run --rm etl complete --month 11/2025 --parallel
+
+# Apenas download
+docker compose run --rm etl download --month 11/2025 --workers 10
+
+# Apenas carga (arquivos já baixados)
+docker compose run --rm etl db load --month 11/2025 --parallel
+
+# Listar meses disponíveis
+docker compose run --rm etl get-availables
+
+# Ver ajuda
+docker compose run --rm etl --help
+```
+
+### Volumes Mapeados
+
+| Host | Container | Descrição |
+|------|-----------|-----------|
+| `./data/downloads` | `/app/data/downloads` | Arquivos ZIP baixados (~6GB) |
+| `./data/locations` | `/app/data/locations` | CSVs do IBGE (somente leitura) |
+| `./docker/volumes/postgresql` | `/var/lib/postgresql/data` | Dados do PostgreSQL (~40GB) |
+
+> Os downloads são persistidos no host, permitindo reutilização entre execuções.
+
+### Execução em Servidores Remotos
+
+O Docker facilita a execução em servidores com mais recursos (CPU, RAM, SSD):
+
+```bash
+# Clone no servidor remoto
+git clone https://github.com/brasildatahub/rfb-cnpj-etl.git
+cd rfb-cnpj-etl
+
+# Configure e execute
+cp .env.example .env
+# Edite .env conforme necessário
+
+docker compose up -d postgres
+docker compose run --rm etl complete --month 11/2025 --parallel
+```
+
+---
+
 ## Referência de Comandos
 
 ### Visão Geral
 
 ```bash
+# Execução local
 python etl.py <comando> [opções]
+
+# Execução via Docker
+docker compose run --rm etl <comando> [opções]
 ```
 
 | Comando | Descrição |
@@ -266,6 +368,20 @@ Todas as **constantes globais** como diretórios, downloads simultâneos, entre 
 | `POSTGRES` | Credenciais do PostgreSQL | `localhost:5432` |
 | `BATCH_SIZE` | Tamanho do lote de inserção | `250000` |
 
+### Variáveis de Ambiente
+
+As configurações também podem ser definidas via variáveis de ambiente:
+
+| Variável | Descrição |
+|----------|-----------|
+| `POSTGRES_HOST` | Host do PostgreSQL |
+| `POSTGRES_PORT` | Porta do PostgreSQL |
+| `POSTGRES_USER` | Usuário do PostgreSQL |
+| `POSTGRES_PASSWORD` | Senha do PostgreSQL |
+| `POSTGRES_DBNAME` | Nome do banco de dados |
+| `DOWNLOAD_PATH` | Diretório para downloads |
+| `IBGE_CSV_DIR` | Diretório dos CSVs do IBGE |
+
 ### Chaves primárias, estrangeiras e índices
 
 As definições de chaves primárias, estrangeiras e índices podem ser encontradas em `src/rfb_cnpj_etl/db/schema.py`.
@@ -357,6 +473,11 @@ rfb-cnpj-etl/
 │           ├── db_patch.py            # Correções estáticas na base de dados
 │           ├── ibge_lookup.py         # Lookup de códigos IBGE
 │           └── zip_metadata.py        # Validação e metadados dos arquivos ZIP
+├── docker/
+│   ├── etl/
+│   │   └── Dockerfile                 # Imagem Docker do ETL Python
+│   └── volumes/
+│       └── postgresql/                # Dados persistentes do PostgreSQL
 ├── sql/                               # Scripts SQL auxiliares (execução manual)
 │   ├── materialized_views.sql         # Views materializadas com estatísticas agregadas
 │   ├── general_improvements.sql       # Extensões, funções de manutenção e validações
@@ -364,10 +485,10 @@ rfb-cnpj-etl/
 ├── data/                              # Diretório padrão para downloads
 │   ├── downloads/                     # Arquivos ZIP baixados da RFB
 │   └── locations/                     # Dados IBGE (regiões, estados, cidades)
-├── docker/                            # Configurações Docker
-│   └── volumes/                       # Volumes persistentes
 ├── etl.py                             # Wrapper para execução do CLI
-├── docker-compose.yaml                # Configuração do Docker Compose
+├── docker-compose.yaml                # Orquestração dos containers Docker
+├── .env.example                       # Template de variáveis de ambiente
+├── .dockerignore                      # Arquivos ignorados no build Docker
 ├── cnpj-metadados.pdf                 # Dicionário de Dados do CNPJ (Receita Federal)
 ├── AGENTS.md                          # Guidelines do repositório
 ├── .gitignore

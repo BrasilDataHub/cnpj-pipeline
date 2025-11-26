@@ -1,0 +1,85 @@
+# =============================================================================
+# Docker Ignore - ETL CNPJ
+# =============================================================================
+# Arquivos e diretórios ignorados durante o build da imagem Docker.
+# Isso reduz o tamanho do contexto de build e acelera o processo.
+# =============================================================================
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Ambiente virtual Python
+.venv
+venv
+env
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# IDE e editores
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.cursor/
+
+# Docker
+docker/
+Dockerfile
+docker-compose*.yaml
+docker-compose*.yml
+.docker
+
+# Arquivos de ambiente
+.env
+.env.*
+env.example
+
+# Downloads (serão montados via volume)
+data/downloads/
+
+# Documentação e arquivos não necessários no container
+*.md
+!README.md
+*.pdf
+*.plan.md
+LICENSE
+AGENTS.md
+
+# Testes
+tests/
+test/
+*.test.py
+pytest.ini
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs
+*.log
+logs/
+
+# Sistema
+.DS_Store
+Thumbs.db
+

@@ -1,22 +1,68 @@
 services:
   postgres:
     image: postgres:17
+    container_name: rfb-cnpj-postgres
     restart: always
     healthcheck:
-      test: ["CMD", "pg_isready", "-q", "-d", "${POSTGRES_DBNAME}", "-U", "${POSTGRES_USER}"]
-      retries: 3
+      test: ["CMD", "pg_isready", "-q", "-d", "${POSTGRES_DBNAME:-dados_cnpj}", "-U", "${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      retries: 5
       timeout: 5s
     volumes:
       - ./docker/volumes/postgresql:/var/lib/postgresql/data
     environment:
-      - POSTGRES_DB=${POSTGRES_DBNAME}
-      - POSTGRES_USER=${POSTGRES_USER}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DBNAME:-dados_cnpj}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      # Otimizações de performance para carga massiva
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
     ports:
       - '${FORWARD_DB_PORT:-5432}:5432'
     networks:
-      - rfb-scrapper
+      - rfb-cnpj-network
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+        reservations:
+          memory: 2G
+
+  etl:
+    build:
+      context: .
+      dockerfile: docker/etl/Dockerfile
+    container_name: rfb-cnpj-etl
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      # Volume para persistir arquivos baixados no host
+      - ./data/downloads:/app/data/downloads
+      # Volume para dados IBGE (somente leitura)
+      - ./data/locations:/app/data/locations:ro
+    environment:
+      # Conexão com PostgreSQL (usa o nome do serviço como host)
+      POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DBNAME: ${POSTGRES_DBNAME:-dados_cnpj}
+      # Caminhos dentro do container
+      DOWNLOAD_PATH: ${DOWNLOAD_PATH:-/app/data/downloads}
+      IBGE_CSV_DIR: ${IBGE_CSV_DIR:-/app/data/locations}
+    networks:
+      - rfb-cnpj-network
+    # Stdin/tty para barras de progresso interativas
+    stdin_open: true
+    tty: true
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 1G
 
 networks:
-  rfb-scrapper:
+  rfb-cnpj-network:
     driver: bridge
+    name: rfb-cnpj-network
