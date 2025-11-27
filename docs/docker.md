@@ -33,6 +33,12 @@ docker compose run --rm etl download --month 11/2025 --workers 10
 # Apenas carga (arquivos já baixados)
 docker compose run --rm etl db load --month 11/2025 --parallel
 
+# Criar Materialized Views (opcional, após carga)
+docker compose run --rm etl db views create
+
+# Atualizar Materialized Views
+docker compose run --rm etl db views refresh --concurrent
+
 # Listar meses disponíveis
 docker compose run --rm etl get-availables
 
@@ -133,6 +139,26 @@ docker run --rm \
   -v ./data/downloads:/app/data/downloads \
   ghcr.io/brasildatahub/cnpj-etl:latest \
   db load --month 11/2025 --parallel
+
+# Criar Materialized Views (opcional, após carga)
+docker run --rm \
+  -e POSTGRES_HOST=seu-host \
+  -e POSTGRES_PORT=5432 \
+  -e POSTGRES_USER=seu-usuario \
+  -e POSTGRES_PASSWORD=sua-senha \
+  -e POSTGRES_DBNAME=dados_cnpj \
+  ghcr.io/brasildatahub/cnpj-etl:latest \
+  db views create
+
+# Atualizar Materialized Views
+docker run --rm \
+  -e POSTGRES_HOST=seu-host \
+  -e POSTGRES_PORT=5432 \
+  -e POSTGRES_USER=seu-usuario \
+  -e POSTGRES_PASSWORD=sua-senha \
+  -e POSTGRES_DBNAME=dados_cnpj \
+  ghcr.io/brasildatahub/cnpj-etl:latest \
+  db views refresh --concurrent
 
 # Listar meses disponíveis
 docker run --rm ghcr.io/brasildatahub/cnpj-etl:latest get-availables

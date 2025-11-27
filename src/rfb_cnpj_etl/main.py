@@ -75,6 +75,22 @@ def main() -> None:
     p_fk = db_sub.add_parser("fk", help="Cria chaves estrangeiras no banco")
     p_fk.add_argument("--db-name", type=str, default=POSTGRES["database"])
 
+    # db-views (subcomando com create e refresh)
+    views_cmd = db_sub.add_parser("views", help="Comandos para Materialized Views")
+    views_sub = views_cmd.add_subparsers(dest="views_command", required=True)
+
+    # db views create
+    p_views_create = views_sub.add_parser("create", help="Cria/recria as Materialized Views")
+    p_views_create.add_argument("--db-name", type=str, default=POSTGRES["database"],
+                                help="Nome do banco Postgres")
+
+    # db views refresh
+    p_views_refresh = views_sub.add_parser("refresh", help="Atualiza as Materialized Views")
+    p_views_refresh.add_argument("--db-name", type=str, default=POSTGRES["database"],
+                                 help="Nome do banco Postgres")
+    p_views_refresh.add_argument("--concurrent", action="store_true",
+                                 help="Usar REFRESH CONCURRENTLY (requer índice único)")
+
     # complete
     p_complete = sub.add_parser("complete", help="Baixa e carrega dados automaticamente")
     p_complete.add_argument("--month", type=str)
@@ -115,17 +131,25 @@ def main() -> None:
             dm.start_download_queue()
 
         elif args.command == "db":
-            run_orchestrator(
-                command=args.db_command,
-                db_name=args.db_name,
-                month_year=getattr(args, "month", None),
-                files_dir=getattr(args, "download_dir", None),
-                skip_indexes=getattr(args, "skip_index", False),
-                skip_validation=getattr(args, "skip_validation", False),
-                low_memory=getattr(args, "low_memory", DEFAULT_LOW_MEMORY),
-                parallel=getattr(args, "parallel", DEFAULT_PARALLEL),
-                only_data=getattr(args, "only_data", False)
-            )
+            # Comando de views (subcomando próprio)
+            if args.db_command == "views":
+                run_orchestrator(
+                    command=f"views-{args.views_command}",
+                    db_name=args.db_name,
+                    concurrent=getattr(args, "concurrent", False)
+                )
+            else:
+                run_orchestrator(
+                    command=args.db_command,
+                    db_name=args.db_name,
+                    month_year=getattr(args, "month", None),
+                    files_dir=getattr(args, "download_dir", None),
+                    skip_indexes=getattr(args, "skip_index", False),
+                    skip_validation=getattr(args, "skip_validation", False),
+                    low_memory=getattr(args, "low_memory", DEFAULT_LOW_MEMORY),
+                    parallel=getattr(args, "parallel", DEFAULT_PARALLEL),
+                    only_data=getattr(args, "only_data", False)
+                )
 
         elif args.command == "complete":
             dm = CNPJDownloadManager(

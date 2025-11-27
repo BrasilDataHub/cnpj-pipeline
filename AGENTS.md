@@ -13,6 +13,8 @@
 - Initialize DB schema: `python etl.py db init [--db-name NAME]`.
 - Load data into DB: `python etl.py db load [--month MM/AAAA --download-dir PATH --skip-index --skip-validation --low-memory --parallel]`.
 - Full pipeline: `python etl.py complete [--month MM/AAAA ...]` (downloads + load + indexes).
+- Create Materialized Views: `python etl.py db views create [--db-name NAME]`.
+- Refresh Materialized Views: `python etl.py db views refresh [--db-name NAME --concurrent]`.
 - For flags and defaults, run `python etl.py --help` or check the README.
 
 ## Coding Style & Naming

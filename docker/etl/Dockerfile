@@ -42,6 +42,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY etl.py .
 COPY src/ ./src/
 
+# Copiar scripts SQL (materialized views, etc.)
+COPY sql/ ./sql/
+
 # Copiar dados estáticos (CSVs do IBGE)
 COPY data/locations/ ./data/locations/
 

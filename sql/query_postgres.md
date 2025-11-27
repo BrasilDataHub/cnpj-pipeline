@@ -354,5 +354,118 @@ Os seguintes índices são criados automaticamente pelo ETL:
 2. **Filtre por `cod_situacao_cadastral`** - Reduz drasticamente o volume de dados
 3. **Use códigos IBGE para localização** - `cod_estado_ibge` e `cod_cidade_ibge` têm índices
 4. **Evite `LIKE '%termo%'** - Para buscas textuais, execute `sql/indexes.sql` para criar índices GIN
-5. **Use as Views Materializadas** - Para estatísticas agregadas, execute `sql/materialized_views.sql`
+5. **Use as Materialized Views** - Para estatísticas agregadas, use `python etl.py db views create`
+
+---
+
+## Materialized Views
+
+As Materialized Views pré-computam estatísticas agregadas, reduzindo consultas de minutos para milissegundos.
+
+### Criar as Views
+
+```bash
+python etl.py db views create
+```
+
+### Views Disponíveis
+
+| View | Descrição |
+|------|-----------|
+| `mv_stats_estado` | Estatísticas agregadas por estado |
+| `mv_stats_municipio` | Estatísticas agregadas por município |
+| `mv_stats_cnae` | Estatísticas agregadas por CNAE |
+| `mv_stats_cnae_estado` | Estatísticas detalhadas CNAE x Estado |
+| `mv_abertura_periodo` | Aberturas por mês/estado (desde 2000) |
+| `mv_top_cnaes_cidade` | Top 20 CNAEs por cidade |
+
+### Exemplos de Consultas com MVs
+
+#### Estatísticas por estado (instantâneo!)
+
+```sql
+SELECT 
+    sigla_uf,
+    nome_estado,
+    total_estabelecimentos,
+    ativos,
+    matrizes,
+    total_empresas,
+    novos_1ano
+FROM mv_stats_estado
+ORDER BY total_estabelecimentos DESC;
+```
+
+#### Top 10 municípios por número de empresas
+
+```sql
+SELECT 
+    nome_cidade,
+    sigla_uf,
+    total_empresas,
+    ativos,
+    novos_6meses
+FROM mv_stats_municipio
+ORDER BY total_empresas DESC
+LIMIT 10;
+```
+
+#### CNAEs mais comuns no país
+
+```sql
+SELECT 
+    cod_cnae_principal,
+    nome_cnae,
+    total_estabelecimentos,
+    ativos,
+    estados_presentes
+FROM mv_stats_cnae
+ORDER BY total_estabelecimentos DESC
+LIMIT 20;
+```
+
+#### Evolução de aberturas por mês em SP
+
+```sql
+SELECT 
+    mes_abertura,
+    total_aberturas,
+    empresas_unicas,
+    ainda_ativos
+FROM mv_abertura_periodo
+WHERE cod_estado_ibge = 35  -- São Paulo
+  AND mes_abertura >= '2023-01-01'
+ORDER BY mes_abertura;
+```
+
+#### Top CNAEs de uma cidade específica
+
+```sql
+SELECT 
+    cod_cnae_principal,
+    nome_cnae,
+    total,
+    ranking
+FROM mv_top_cnaes_cidade
+WHERE cod_cidade_ibge = 3550308  -- São Paulo capital
+ORDER BY ranking;
+```
+
+### Atualizar as Views
+
+Após nova carga de dados, atualize as MVs:
+
+```bash
+# Refresh padrão (bloqueia leituras durante a atualização)
+python etl.py db views refresh
+
+# Refresh concorrente (não bloqueia, requer índice único)
+python etl.py db views refresh --concurrent
+```
+
+Ou use a função SQL diretamente:
+
+```sql
+SELECT * FROM refresh_all_mvs();
+```
 

@@ -27,7 +27,8 @@ def run_orchestrator(
         skip_validation: bool = False,
         parallel: bool = DEFAULT_PARALLEL,
         low_memory: bool = DEFAULT_LOW_MEMORY,
-        only_data: bool = False
+        only_data: bool = False,
+        concurrent: bool = False
 ):
     """
     Orquestração da carga no banco de dados PostgreSQL.
@@ -39,6 +40,8 @@ def run_orchestrator(
         - pk: Adiciona chaves primárias
         - index: Cria todos os índices (básicos + avançados)
         - fk: Cria chaves estrangeiras
+        - views-create: Cria/recria Materialized Views
+        - views-refresh: Atualiza Materialized Views
 
     :params:
         command: comando a ser executado.
@@ -50,6 +53,7 @@ def run_orchestrator(
         parallel: se deve usar threads para processamento.
         low_memory: se deve usar baixa memória para processamento.
         only_data: se True, carrega apenas dados sem executar patch/pk/index/fk.
+        concurrent: se True, usa REFRESH CONCURRENTLY para views (requer índice único).
     """
     print_log("INICIANDO TAREFAS DO BANCO DE DADOS...", level="start")
 
@@ -143,4 +147,13 @@ def run_orchestrator(
     elif command == "load" and not only_data:
         builder.enable_foreign_keys()
 
-    print_log(f"EXECUÇÃO FINALIZADA | POSTGRES | {month_year}", level="done")
+    # =========================================================================
+    # ETAPA 7: Materialized Views (comandos opcionais)
+    # =========================================================================
+    if command == "views-create":
+        builder.create_materialized_views()
+
+    if command == "views-refresh":
+        builder.refresh_materialized_views(concurrent=concurrent)
+
+    print_log(f"EXECUÇÃO FINALIZADA | POSTGRES | {month_year or command}", level="done")

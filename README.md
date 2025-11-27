@@ -17,6 +17,7 @@ O total de linhas (somando todas as tabelas) já está na casa dos **200 milhõe
 - Download completo da base de dados CNPJ no site da RFB
 - Carga completa em banco de dados PostgreSQL
 - Criação de índices otimizados (BTREE, GIN, BRIN, HASH)
+- Materialized Views para estatísticas agregadas (consultas em milissegundos)
 - Execução por etapas independentes (permite retomar de qualquer ponto)
 - **Suporte a Docker** para execução portátil em qualquer ambiente
 
@@ -60,6 +61,12 @@ python etl.py download --month 11/2025
 # Apenas carga
 python etl.py db load --month 11/2025 --parallel
 
+# Criar Materialized Views (opcional, após carga)
+python etl.py db views create
+
+# Atualizar Materialized Views
+python etl.py db views refresh --concurrent
+
 # Listar meses disponíveis
 python etl.py get-availables
 
@@ -99,6 +106,7 @@ rfb-cnpj-etl/
 │   └── utils/             # Utilitários
 ├── docs/                  # Documentação detalhada
 ├── sql/                   # Scripts SQL auxiliares
+│   └── materialized_views/ # Scripts de MVs
 ├── data/                  # Downloads e dados IBGE
 ├── docker/                # Dockerfile e volumes
 ├── docker-compose.yaml

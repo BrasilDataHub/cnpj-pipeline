@@ -343,7 +343,7 @@ Uso: SELECT * FROM check_referential_integrity();';
 \echo ''
 \echo 'Próximos passos:'
 \echo '  1. Execute sql/indexes.sql para criar índices otimizados'
-\echo '  2. Execute sql/materialized_views.sql para criar MVs'
+\echo '  2. Execute: python etl.py db views create (para criar MVs)'
 \echo '  3. Execute SELECT * FROM vacuum_analyze_all();'
 \echo '  4. Execute SELECT * FROM prewarm_critical_indexes();'
 \echo '  5. Execute SELECT * FROM validate_cnpj_completo();'

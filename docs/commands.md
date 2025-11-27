@@ -22,6 +22,8 @@ docker compose run --rm etl <comando> [opções]
 | `db pk` | Adiciona chaves primárias |
 | `db index` | Cria todos os índices (básicos + avançados) |
 | `db fk` | Cria chaves estrangeiras |
+| `db views create` | Cria/recria Materialized Views |
+| `db views refresh` | Atualiza dados das Materialized Views |
 | `complete` | Executa todo o pipeline (download + carga) |
 
 ---
@@ -133,6 +135,49 @@ O comando `db index` cria automaticamente:
 
 ---
 
+## Comandos `db views create` e `db views refresh`
+
+Comandos **opcionais** para criação e atualização de Materialized Views (MVs).
+
+As MVs pré-computam estatísticas agregadas que reduzem consultas de minutos para milissegundos.
+
+| Flag | Tipo | Padrão | Descrição |
+|------|------|--------|-----------|
+| `--db-name` | `string` | `dados_cnpj` | Nome do banco |
+| `--concurrent` | flag | - | Usa `REFRESH CONCURRENTLY` (apenas para `refresh`) |
+
+```bash
+# Criar/recriar todas as Materialized Views
+python etl.py db views create
+
+# Atualizar dados das MVs (após nova carga)
+python etl.py db views refresh
+
+# Atualizar sem bloquear leituras (requer índice único nas MVs)
+python etl.py db views refresh --concurrent
+```
+
+### Materialized Views disponíveis
+
+| View | Descrição | Tempo estimado |
+|------|-----------|----------------|
+| `mv_stats_estado` | Estatísticas agregadas por estado | ~2 min |
+| `mv_stats_municipio` | Estatísticas agregadas por município | ~5 min |
+| `mv_stats_cnae` | Estatísticas agregadas por CNAE | ~3 min |
+| `mv_stats_cnae_estado` | Estatísticas detalhadas CNAE x Estado | ~10 min |
+| `mv_abertura_periodo` | Aberturas por mês/estado (desde 2000) | ~8 min |
+| `mv_top_cnaes_cidade` | Top 20 CNAEs por cidade | ~15 min |
+
+**Arquivos SQL:** Os scripts estão em `sql/materialized_views/` e são executados na ordem alfabética.
+
+**Periodicidade de refresh recomendada:**
+- `mv_stats_estado`, `mv_stats_cnae`: Diário
+- Demais MVs: Semanal ou quinzenal
+
+**Espaço estimado:** ~2 GB
+
+---
+
 ## Comando `complete`
 
 Executa o pipeline completo: **download + carga** em sequência.
@@ -172,6 +217,7 @@ O ETL pode ser executado **etapa por etapa**, útil para:
 | 5 | `python etl.py db pk` | Adiciona chaves primárias |
 | 6 | `python etl.py db index` | Cria todos os índices (básicos + avançados) |
 | 7 | `python etl.py db fk` | Cria chaves estrangeiras |
+| 8 | `python etl.py db views create` | *(Opcional)* Cria Materialized Views |
 
 **Retomar após falha:**
 
@@ -203,5 +249,8 @@ python etl.py --help
 python etl.py download --help
 python etl.py db --help
 python etl.py db load --help
+python etl.py db views --help
+python etl.py db views create --help
+python etl.py db views refresh --help
 ```
 

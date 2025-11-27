@@ -4,7 +4,10 @@
 Módulo para construção do banco de dados PostgreSQL.
 """
 
+import os
+import time
 import psycopg2
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 from ..db.schema import SCHEMA
@@ -591,6 +594,166 @@ class PostgresBuilder:
             self.enable_extensions()
             self.drop_tables()
             self.create_tables()
+        finally:
+            if self.conn:
+                self.conn.close()
+                self.conn = None
+
+    def _get_mv_sql_dir(self) -> Path:
+        """Retorna o caminho da pasta sql/materialized_views/."""
+        # Navega de db/ -> rfb_cnpj_etl/ -> src/ -> projeto/ -> sql/materialized_views/
+        base_dir = Path(__file__).resolve().parents[3]
+        return base_dir / "sql" / "materialized_views"
+
+    def create_materialized_views(self) -> None:
+        """
+        Cria todas as Materialized Views a partir dos arquivos SQL.
+        
+        Os arquivos SQL são lidos da pasta sql/materialized_views/ e executados
+        sequencialmente na ordem alfabética (numeração no nome do arquivo).
+        
+        Pode ser executado via: python etl.py db views create
+        """
+        try:
+            print_log("CRIANDO MATERIALIZED VIEWS...", level="task")
+            
+            sql_dir = self._get_mv_sql_dir()
+            if not sql_dir.exists():
+                raise FileNotFoundError(f"Pasta não encontrada: {sql_dir}")
+            
+            # Lista arquivos .sql ordenados por nome
+            sql_files = sorted(sql_dir.glob("*.sql"))
+            
+            if not sql_files:
+                print_log("NENHUM ARQUIVO SQL ENCONTRADO", level="warning")
+                return
+            
+            total = len(sql_files)
+            width = len(str(total))
+            
+            if self.conn is None:
+                self.conn = self._connect()
+            self.conn.autocommit = True
+            cur = self.conn.cursor()
+            
+            for i, sql_file in enumerate(sql_files, start=1):
+                file_name = sql_file.name
+                try:
+                    print_log(f"[{i:0{width}}/{total}] EXECUTANDO: {file_name}...", level="docs")
+                    
+                    sql_content = sql_file.read_text(encoding="utf-8")
+                    
+                    # Remove comentários de linha única e executa
+                    # O psycopg2 aceita múltiplos statements separados por ;
+                    start_time = time.time()
+                    cur.execute(sql_content)
+                    elapsed = time.time() - start_time
+                    
+                    print_log(f"[{i:0{width}}/{total}] CONCLUÍDO: {file_name} ({elapsed:.1f}s)", level="success")
+                    
+                except psycopg2.Error as e:
+                    print_log(f"[{i:0{width}}/{total}] ERRO EM {file_name}: {e}", level="error")
+                    raise
+            
+            print_log("TODAS AS MATERIALIZED VIEWS FORAM CRIADAS", level="success")
+            
+        except Exception as e:
+            print_log(f"ERRO AO CRIAR MATERIALIZED VIEWS: {e}", level="error")
+            raise
+        finally:
+            if self.conn:
+                self.conn.close()
+                self.conn = None
+
+    def refresh_materialized_views(self, concurrent: bool = True) -> None:
+        """
+        Atualiza todas as Materialized Views existentes no banco.
+        
+        Consulta pg_matviews para obter a lista de MVs e executa REFRESH
+        para cada uma delas.
+        
+        Args:
+            concurrent: Se True, usa REFRESH CONCURRENTLY (requer índice único).
+                       Se False, usa REFRESH simples (bloqueia leituras).
+        
+        Pode ser executado via: python etl.py db views refresh [--concurrent]
+        """
+        try:
+            print_log("ATUALIZANDO MATERIALIZED VIEWS...", level="task")
+            
+            if self.conn is None:
+                self.conn = self._connect()
+            self.conn.autocommit = True
+            cur = self.conn.cursor()
+            
+            # Consulta MVs existentes que começam com mv_
+            cur.execute("""
+                SELECT matviewname 
+                FROM pg_matviews 
+                WHERE schemaname = 'public' 
+                  AND matviewname LIKE 'mv_%'
+                ORDER BY matviewname;
+            """)
+            
+            mv_names = [row[0] for row in cur.fetchall()]
+            
+            if not mv_names:
+                print_log("NENHUMA MATERIALIZED VIEW ENCONTRADA", level="warning")
+                return
+            
+            total = len(mv_names)
+            width = len(str(total))
+            
+            # MVs que possuem índice único (podem usar CONCURRENTLY)
+            mvs_with_unique_index = set()
+            if concurrent:
+                cur.execute("""
+                    SELECT DISTINCT tablename 
+                    FROM pg_indexes 
+                    WHERE schemaname = 'public' 
+                      AND tablename LIKE 'mv_%'
+                      AND indexdef LIKE '%UNIQUE%';
+                """)
+                mvs_with_unique_index = {row[0] for row in cur.fetchall()}
+            
+            results = []
+            
+            for i, mv_name in enumerate(mv_names, start=1):
+                try:
+                    # Verifica se pode usar CONCURRENTLY
+                    use_concurrent = concurrent and mv_name in mvs_with_unique_index
+                    refresh_type = "CONCURRENTLY" if use_concurrent else ""
+                    
+                    print_log(f"[{i:0{width}}/{total}] REFRESH {refresh_type} {mv_name}...", level="docs")
+                    
+                    start_time = time.time()
+                    
+                    if use_concurrent:
+                        cur.execute(f"REFRESH MATERIALIZED VIEW CONCURRENTLY {mv_name};")
+                    else:
+                        cur.execute(f"REFRESH MATERIALIZED VIEW {mv_name};")
+                    
+                    elapsed = time.time() - start_time
+                    results.append((mv_name, "OK", elapsed))
+                    
+                    print_log(f"[{i:0{width}}/{total}] {mv_name} ATUALIZADA ({elapsed:.1f}s)", level="success")
+                    
+                except psycopg2.Error as e:
+                    results.append((mv_name, "ERRO", str(e)))
+                    print_log(f"[{i:0{width}}/{total}] ERRO EM {mv_name}: {e}", level="error")
+            
+            # Resumo
+            ok_count = sum(1 for r in results if r[1] == "OK")
+            err_count = sum(1 for r in results if r[1] == "ERRO")
+            
+            if err_count > 0:
+                print_log(f"REFRESH CONCLUÍDO: {ok_count} OK, {err_count} ERRO(S)", level="warning")
+            else:
+                print_log(f"TODAS AS {ok_count} MATERIALIZED VIEWS FORAM ATUALIZADAS", level="success")
+            
+        except Exception as e:
+            print_log(f"ERRO AO ATUALIZAR MATERIALIZED VIEWS: {e}", level="error")
+            raise
         finally:
             if self.conn:
                 self.conn.close()

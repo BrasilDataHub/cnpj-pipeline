@@ -33,6 +33,35 @@ Edite conforme a sua necessidade.
 
 ---
 
+## Materialized Views (Opcionais)
+
+As Materialized Views pré-calculam estatísticas agregadas, reduzindo consultas de minutos para milissegundos.
+
+### Criação via CLI (Recomendado)
+
+```bash
+# Criar/recriar todas as Materialized Views
+python etl.py db views create
+
+# Atualizar após nova carga de dados
+python etl.py db views refresh --concurrent
+```
+
+### Views Disponíveis
+
+| View | Descrição |
+|------|-----------|
+| `mv_stats_estado` | Estatísticas por estado |
+| `mv_stats_municipio` | Estatísticas por município |
+| `mv_stats_cnae` | Estatísticas por CNAE |
+| `mv_stats_cnae_estado` | Estatísticas CNAE x Estado |
+| `mv_abertura_periodo` | Aberturas por período |
+| `mv_top_cnaes_cidade` | Top CNAEs por cidade |
+
+Os scripts SQL estão em `sql/materialized_views/` e são executados na ordem alfabética pelo CLI.
+
+---
+
 ## Scripts SQL Auxiliares (Opcionais)
 
 Na pasta `sql/` estão disponíveis **scripts auxiliares** para otimizações avançadas. Esses scripts **não são executados
@@ -44,34 +73,22 @@ automaticamente** pelo ETL e devem ser aplicados manualmente conforme a necessid
 ### Quando Utilizar
 
 Execute esses scripts **após a conclusão do ETL** (após `db fk` ou `complete`), quando:
-- Quiser estatísticas pré-calculadas para dashboards
 - Necessitar de funções de manutenção e validação
 
 ### Scripts Disponíveis
 
 | Arquivo | Propósito | Pré-requisitos |
 |---------|-----------|----------------|
-| `materialized_views.sql` | 6 views materializadas com estatísticas agregadas por estado, município, CNAE e período | Dados já carregados no banco |
 | `general_improvements.sql` | Extensões PostgreSQL, funções de manutenção, validações e configurações de performance | Permissões de superusuário para algumas operações |
 
 ### Como Executar
 
 ```bash
 # Conectar ao banco e executar (substitua as credenciais)
-psql -h localhost -U seu_usuario -d cnpj_rfb -f sql/materialized_views.sql
 psql -h localhost -U seu_usuario -d cnpj_rfb -f sql/general_improvements.sql
 ```
 
-### Detalhes de Cada Script
-
-**`materialized_views.sql`** - Estatísticas pré-calculadas:
-- `mv_stats_estado`: empresas ativas por estado
-- `mv_stats_municipio`: empresas ativas por município
-- `mv_stats_cnae`: distribuição por atividade econômica
-- `mv_stats_cnae_estado`: CNAEs por estado
-- `mv_abertura_periodo`: aberturas por período
-- `mv_top_cnaes_cidade`: principais CNAEs por cidade
-- Função `refresh_all_mvs()` para atualização
+### Detalhes
 
 **`general_improvements.sql`** - Configurações e manutenção:
 - Extensões: `pg_trgm`, `pg_prewarm`, `pg_stat_statements`
