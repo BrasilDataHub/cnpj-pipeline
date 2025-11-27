@@ -267,6 +267,129 @@ ADVANCED_INDEXES = [
         'columns': ['nome_socio'],
         'ops': 'varchar_pattern_ops'
     },
+
+    # =========================================================================
+    # OTIMIZAÇÃO: ALTA PRIORIDADE
+    # Índices para resolver problemas críticos de performance identificados
+    # na análise do banco de dados em produção (DATABASE_OPTIMIZATION_REPORT.md)
+    # =========================================================================
+
+    # -------------------------------------------------------------------------
+    # Índices compostos para TODAS as situações cadastrais (não apenas ativas)
+    # Resolve: Consultas de empresas inativas/baixadas que faziam table scan
+    # Impacto: Queries de 300-500ms → <10ms
+    # -------------------------------------------------------------------------
+    {
+        'name': 'idx_estab_cidade_situacao_cnpj',
+        'table': 'estabelecimento',
+        'columns': ['cod_cidade_ibge', 'cod_situacao_cadastral', 'cnpj_completo'],
+        'comment': 'Suporta paginação por cursor para QUALQUER situação cadastral'
+    },
+    {
+        'name': 'idx_estab_estado_situacao_cnpj',
+        'table': 'estabelecimento',
+        'columns': ['cod_estado_ibge', 'cod_situacao_cadastral', 'cnpj_completo'],
+        'comment': 'Suporta paginação por cursor para QUALQUER situação cadastral'
+    },
+
+    # -------------------------------------------------------------------------
+    # SIMPLES NACIONAL / MEI - Índices Parciais
+    # Resolve: Filtros por regime tributário faziam scan em ~46M registros
+    # Impacto: Queries de 500-800ms → <50ms
+    # -------------------------------------------------------------------------
+    {
+        'name': 'idx_simples_opcao_simples',
+        'table': 'simples',
+        'columns': ['cnpj_basico'],
+        'where': "opcao_simples = 'S'",
+        'comment': 'Índice parcial para empresas do Simples Nacional'
+    },
+    {
+        'name': 'idx_simples_opcao_mei',
+        'table': 'simples',
+        'columns': ['cnpj_basico'],
+        'where': "opcao_mei = 'S'",
+        'comment': 'Índice parcial para MEI'
+    },
+
+    # =========================================================================
+    # OTIMIZAÇÃO: MÉDIA PRIORIDADE
+    # Índices compostos para filtros combinados frequentes
+    # =========================================================================
+
+    # -------------------------------------------------------------------------
+    # Cidade + CNAE + Situação (substitui índices sem situação)
+    # Resolve: Filtros combinados CNAE + localidade + situação
+    # -------------------------------------------------------------------------
+    {
+        'name': 'idx_estab_cidade_cnae_situacao',
+        'table': 'estabelecimento',
+        'columns': ['cod_cidade_ibge', 'cod_cnae_principal', 'cod_situacao_cadastral'],
+        'comment': 'Filtros combinados: cidade + CNAE + situação'
+    },
+    {
+        'name': 'idx_estab_estado_cnae_situacao',
+        'table': 'estabelecimento',
+        'columns': ['cod_estado_ibge', 'cod_cnae_principal', 'cod_situacao_cadastral'],
+        'comment': 'Filtros combinados: estado + CNAE + situação'
+    },
+
+    # -------------------------------------------------------------------------
+    # EMPRESA - Índices compostos para JOINs otimizados
+    # Resolve: Filtros por porte/natureza jurídica que requerem JOIN
+    # -------------------------------------------------------------------------
+    {
+        'name': 'idx_empresa_porte_cnpj',
+        'table': 'empresa',
+        'columns': ['cod_porte', 'cnpj_basico'],
+        'comment': 'Otimiza JOINs quando filtrando por porte'
+    },
+    {
+        'name': 'idx_empresa_natureza_cnpj',
+        'table': 'empresa',
+        'columns': ['cod_natureza_juridica', 'cnpj_basico'],
+        'comment': 'Otimiza JOINs quando filtrando por natureza jurídica'
+    },
+
+    # =========================================================================
+    # OTIMIZAÇÃO: BAIXA PRIORIDADE
+    # Índices adicionais para casos específicos
+    # =========================================================================
+
+    # -------------------------------------------------------------------------
+    # DDD com Covering Index (mais eficiente que índice simples)
+    # -------------------------------------------------------------------------
+    {
+        'name': 'idx_estab_ddd1_covering',
+        'table': 'estabelecimento',
+        'columns': ['ddd_telefone_1'],
+        'include': ['cnpj_completo', 'cod_cidade_ibge'],
+        'where': "ddd_telefone_1 IS NOT NULL AND ddd_telefone_1 != ''",
+        'comment': 'Covering index para filtros por DDD'
+    },
+
+    # -------------------------------------------------------------------------
+    # Bairro - Busca textual com trigrams
+    # -------------------------------------------------------------------------
+    {
+        'name': 'idx_estab_bairro_trgm',
+        'table': 'estabelecimento',
+        'type': 'GIN',
+        'columns': ['bairro'],
+        'ops': 'gin_trgm_ops',
+        'comment': 'Busca por bairro com ILIKE'
+    },
+
+    # -------------------------------------------------------------------------
+    # Email sem "contab" - Índice parcial para prospecção
+    # -------------------------------------------------------------------------
+    {
+        'name': 'idx_estab_email_prospeccao',
+        'table': 'estabelecimento',
+        'columns': ['cod_cidade_ibge', 'cnpj_completo'],
+        'where': "email IS NOT NULL AND email != '' AND email NOT ILIKE '%contab%'",
+        'comment': 'Emails válidos excluindo contabilidades'
+    },
 ]
 
 

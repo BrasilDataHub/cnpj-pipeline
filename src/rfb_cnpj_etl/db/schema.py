@@ -199,12 +199,16 @@ SCHEMA = {
             ('data_opcao_mei', 'DATE'),
             ('data_exclusao_mei', 'DATE')
         ],
+        'primary_key': ['cnpj_basico'],  # PK para garantir unicidade e performance
         'foreign_keys': [
             {'columns': ['cnpj_basico'], 'references': 'empresa(cnpj_basico)'}
         ],
         'indexes': [
-            {'name': 'idx_simples_empresa', 'columns': ['cnpj_basico']}
+            # Índice composto para consultas que combinam opção + cnpj
+            {'name': 'idx_simples_opcoes', 'columns': ['opcao_simples', 'opcao_mei', 'cnpj_basico']}
         ]
+        # NOTA: Índices parciais para opcao_simples='S' e opcao_mei='S'
+        # estão definidos em advanced_indexes.py
     },
     'socio': {
         'source_file_stem': 'Socios',
