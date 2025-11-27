@@ -96,6 +96,31 @@ ADVANCED_INDEXES = [
     },
 
     # =========================================================================
+    # ESTABELECIMENTO - Paginação por Cursor (Keyset/Infinite Scroll)
+    # Índices parciais para estabelecimentos ativos, ordenados por cnpj_completo.
+    # Suportam consultas com WHERE cod_X = ? AND cnpj_completo > ? ORDER BY cnpj_completo
+    # sem necessidade de COUNT(*) para paginação.
+    # =========================================================================
+    {
+        'name': 'idx_estab_cidade_ativas_cnpj',
+        'table': 'estabelecimento',
+        'columns': ['cod_cidade_ibge', 'cnpj_completo'],
+        'where': "cod_situacao_cadastral = '02'"
+    },
+    {
+        'name': 'idx_estab_estado_ativas_cnpj',
+        'table': 'estabelecimento',
+        'columns': ['cod_estado_ibge', 'cnpj_completo'],
+        'where': "cod_situacao_cadastral = '02'"
+    },
+    {
+        'name': 'idx_estab_regiao_ativas_cnpj',
+        'table': 'estabelecimento',
+        'columns': ['cod_regiao_ibge', 'cnpj_completo'],
+        'where': "cod_situacao_cadastral = '02'"
+    },
+
+    # =========================================================================
     # ESTABELECIMENTO - Busca Textual (GIN + pg_trgm)
     # =========================================================================
     {
