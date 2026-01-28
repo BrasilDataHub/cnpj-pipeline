@@ -57,6 +57,9 @@ python etl.py db views refresh --concurrent
 | `mv_stats_cnae_estado` | Estatísticas CNAE x Estado |
 | `mv_abertura_periodo` | Aberturas por período |
 | `mv_top_cnaes_cidade` | Top CNAEs por cidade |
+| `mv_stats_natureza_juridica_estado` | Estatísticas por natureza jurídica x estado |
+| `mv_stats_natureza_juridica_municipio` | Estatísticas por natureza jurídica x município |
+| `mv_stats_natureza_juridica` | Estatísticas por natureza jurídica |
 
 Os scripts SQL estão em `sql/materialized_views/` e são executados na ordem alfabética pelo CLI.
 

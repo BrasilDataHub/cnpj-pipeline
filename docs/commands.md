@@ -167,6 +167,9 @@ python etl.py db views refresh --concurrent
 | `mv_stats_cnae_estado` | Estatísticas detalhadas CNAE x Estado | ~10 min |
 | `mv_abertura_periodo` | Aberturas por mês/estado (desde 2000) | ~8 min |
 | `mv_top_cnaes_cidade` | Top 20 CNAEs por cidade | ~15 min |
+| `mv_stats_natureza_juridica_estado` | Estatísticas por natureza jurídica x estado | ~6 min |
+| `mv_stats_natureza_juridica_municipio` | Estatísticas por natureza jurídica x município | ~10 min |
+| `mv_stats_natureza_juridica` | Estatísticas agregadas por natureza jurídica | ~3 min |
 
 **Arquivos SQL:** Os scripts estão em `sql/materialized_views/` e são executados na ordem alfabética.
 
