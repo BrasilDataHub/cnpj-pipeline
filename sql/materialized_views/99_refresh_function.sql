@@ -49,6 +49,14 @@ BEGIN
     RETURN NEXT;
 
     start_time := clock_timestamp();
+    REFRESH MATERIALIZED VIEW mv_stats_natureza_juridica_cnae;
+    end_time := clock_timestamp();
+    mv_name := 'mv_stats_natureza_juridica_cnae';
+    status := 'OK';
+    duration := end_time - start_time;
+    RETURN NEXT;
+
+    start_time := clock_timestamp();
     REFRESH MATERIALIZED VIEW CONCURRENTLY mv_regime_tributario_cidade;
     end_time := clock_timestamp();
     mv_name := 'mv_regime_tributario_cidade';
