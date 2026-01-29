@@ -24,6 +24,9 @@ POSTGRES_DBNAME=dados_cnpj
 # Subir apenas o PostgreSQL
 docker compose up -d postgres
 
+# Preparar permissões dos volumes (recomendado na primeira vez)
+ETL_UID=$(id -u) ETL_GID=$(id -g) docker compose up --abort-on-container-exit etl-init-permissions
+
 # Pipeline completo (download + carga + índices)
 docker compose run --rm etl complete --month 01/2026 --parallel
 
@@ -51,10 +54,30 @@ docker compose run --rm etl --help
 | Host | Container | Descrição |
 |------|-----------|-----------|
 | `./data/downloads` | `/app/data/downloads` | Arquivos ZIP baixados (~6GB) |
+| `./data/logs` | `/app/data/logs` | Logs do ETL (rotação diária simples) |
 | `./data/locations` | `/app/data/locations` | CSVs do IBGE (somente leitura) |
 | `./docker/volumes/postgresql` | `/var/lib/postgresql/data` | Dados do PostgreSQL (~40GB) |
 
 > Os downloads são persistidos no host, permitindo reutilização entre execuções.
+
+## Permissões de Volumes (Importante)
+
+A imagem do ETL roda como usuário não-root. Em ambientes Docker, se os diretórios do host
+forem criados como `root`, o container não conseguirá escrever em `/app/data/downloads` e `/app/data/logs`.
+
+Soluções recomendadas:
+
+```bash
+# Ajuste rápido no host (substitua 1000 se necessário)
+sudo chown -R 1000:1000 ./data/downloads ./data/logs
+sudo chmod -R 0775 ./data/downloads ./data/logs
+```
+
+Ou rode o init service que já existe no `docker-compose.yaml` (cria pastas e ajusta permissões):
+
+```bash
+ETL_UID=$(id -u) ETL_GID=$(id -g) docker compose up --abort-on-container-exit etl-init-permissions
+```
 
 ## Execução em Servidores Remotos
 
@@ -70,6 +93,7 @@ cp .env.example .env
 # Edite .env conforme necessário
 
 docker compose up -d postgres
+ETL_UID=$(id -u) ETL_GID=$(id -g) docker compose up --abort-on-container-exit etl-init-permissions
 docker compose run --rm etl complete --month 01/2026 --parallel
 ```
 
@@ -85,6 +109,7 @@ docker run --rm \
   -e POSTGRES_PASSWORD=secret \
   -e POSTGRES_DBNAME=dados_cnpj \
   -v ./data/downloads:/app/data/downloads \
+  -v ./data/logs:/app/data/logs \
   -v ./data/locations:/app/data/locations:ro \
   ghcr.io/brasildatahub/cnpj-etl:latest \
   complete --month 01/2026 --parallel
@@ -105,6 +130,7 @@ docker run --rm \
 | Host | Container | Descrição |
 |------|-----------|-----------|
 | `./data/downloads` | `/app/data/downloads` | Arquivos ZIP baixados (~6GB) |
+| `./data/logs` | `/app/data/logs` | Logs do ETL (rotação diária simples) |
 | `./data/locations` | `/app/data/locations` | CSVs do IBGE (somente leitura) |
 
 > O volume `data/locations` é opcional se a imagem já contém os CSVs do IBGE embutidos.
@@ -120,12 +146,14 @@ docker run --rm \
   -e POSTGRES_PASSWORD=sua-senha \
   -e POSTGRES_DBNAME=dados_cnpj \
   -v ./data/downloads:/app/data/downloads \
+  -v ./data/logs:/app/data/logs \
   ghcr.io/brasildatahub/cnpj-etl:latest \
   complete --month 01/2026 --parallel
 
 # Apenas download
 docker run --rm \
   -v ./data/downloads:/app/data/downloads \
+  -v ./data/logs:/app/data/logs \
   ghcr.io/brasildatahub/cnpj-etl:latest \
   download --month 01/2026 --workers 10
 
@@ -137,6 +165,7 @@ docker run --rm \
   -e POSTGRES_PASSWORD=sua-senha \
   -e POSTGRES_DBNAME=dados_cnpj \
   -v ./data/downloads:/app/data/downloads \
+  -v ./data/logs:/app/data/logs \
   ghcr.io/brasildatahub/cnpj-etl:latest \
   db load --month 01/2026 --parallel
 
@@ -166,4 +195,3 @@ docker run --rm ghcr.io/brasildatahub/cnpj-etl:latest get-availables
 # Ver ajuda
 docker run --rm ghcr.io/brasildatahub/cnpj-etl:latest --help
 ```
-

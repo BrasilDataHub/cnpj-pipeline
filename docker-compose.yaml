@@ -35,9 +35,13 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      etl-init-permissions:
+        condition: service_completed_successfully
     volumes:
       # Volume para persistir arquivos baixados no host
       - ./data/downloads:/app/data/downloads
+      # Volume para logs do ETL no host
+      - ./data/logs:/app/data/logs
       # Volume para dados IBGE (somente leitura)
       - ./data/locations:/app/data/locations:ro
     environment:
@@ -61,6 +65,22 @@ services:
           memory: 4G
         reservations:
           memory: 1G
+
+  etl-init-permissions:
+    image: alpine:3.19
+    container_name: rfb-cnpj-etl-init-permissions
+    user: "0:0"
+    volumes:
+      - ./data/downloads:/app/data/downloads
+      - ./data/logs:/app/data/logs
+    command:
+      - /bin/sh
+      - -c
+      - |
+        mkdir -p /app/data/downloads /app/data/logs && \
+        chown -R ${ETL_UID:-1000}:${ETL_GID:-1000} /app/data/downloads /app/data/logs && \
+        chmod -R 0775 /app/data/downloads /app/data/logs
+    restart: "no"
 
 networks:
   rfb-cnpj-network:
