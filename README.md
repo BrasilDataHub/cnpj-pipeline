@@ -53,7 +53,7 @@ pip install -r requirements.txt
 
 ```bash
 # Pipeline completo (download + carga + índices)
-python etl.py complete --month 11/2025 --parallel
+python etl.py complete --month 11/2025 --parallel --log-file data/logs/etl-{date}.log
 
 # Apenas download
 python etl.py download --month 11/2025
@@ -72,6 +72,21 @@ python etl.py get-availables
 
 # Ajuda
 python etl.py --help
+```
+
+## Logs
+
+O CLI grava logs em arquivo para auditoria. Por padrão, o log é salvo em
+`data/logs/etl-YYYY-MM-DD.log` (rotação diária simples).
+
+Você pode sobrescrever o caminho via `--log-file` ou pela variável de ambiente `LOG_FILE`:
+
+```bash
+# CLI (tem prioridade sobre LOG_FILE)
+python etl.py complete --log-file /var/log/etl/etl-{date}.log
+
+# Variável de ambiente (arquivo ou diretório)
+export LOG_FILE=data/logs/
 ```
 
 ## Requisitos de Espaço

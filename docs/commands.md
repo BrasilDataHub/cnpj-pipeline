@@ -28,6 +28,25 @@ docker compose run --rm etl <comando> [opções]
 
 ---
 
+## Opções Globais
+
+Estas opções funcionam com **todos** os comandos.
+
+| Flag | Tipo | Padrão | Descrição |
+|------|------|--------|-----------|
+| `--log-file` | `path` | `data/logs/etl-YYYY-MM-DD.log` | Arquivo de log (append) com rotação diária |
+
+**Rotação simples por data**
+- Se o caminho for um diretório (ou terminar com `/`), o arquivo será `etl-YYYY-MM-DD.log`.
+- Se o caminho for um arquivo, a data será inserida antes da extensão.
+- Use `{date}` para controlar o formato: `--log-file data/logs/etl-{date}.log`.
+
+**Via variável de ambiente**
+- Defina `LOG_FILE` para um caminho de arquivo ou diretório.
+- `--log-file` sempre tem prioridade sobre `LOG_FILE`.
+
+---
+
 ## Comandos de Consulta
 
 ```bash
@@ -256,4 +275,3 @@ python etl.py db views --help
 python etl.py db views create --help
 python etl.py db views refresh --help
 ```
-

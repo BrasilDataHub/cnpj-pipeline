@@ -1,10 +1,13 @@
 # main.py
 
 import argparse
+import os
+from datetime import datetime
+from pathlib import Path
 from .orchestrator import run_orchestrator
 from .cnpj_data import CNPJDataScraper, CNPJDownloadManager
-from .utils.logger import print_log
-from .config import DEFAULT_PARALLEL, DEFAULT_LOW_MEMORY, POSTGRES
+from .utils.logger import print_log, set_log_file
+from .config import DEFAULT_PARALLEL, DEFAULT_LOW_MEMORY, POSTGRES, BASE_DIR, DATA_DIR
 
 
 def str2bool(value):
@@ -18,9 +21,39 @@ def str2bool(value):
         raise argparse.ArgumentTypeError("Valor deve ser true ou false")
 
 
+def _resolve_log_file_path(cli_value: str = None) -> str:
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    raw_value = cli_value or os.getenv("LOG_FILE")
+
+    if not raw_value:
+        return str(DATA_DIR / "logs" / f"etl-{date_str}.log")
+
+    expanded = os.path.expanduser(raw_value)
+    raw_path = Path(expanded)
+    if not raw_path.is_absolute():
+        raw_path = BASE_DIR / raw_path
+
+    raw_path_str = str(raw_path)
+    if "{date}" in raw_path_str:
+        return raw_path_str.replace("{date}", date_str)
+
+    if expanded.endswith(os.sep) or (raw_path.exists() and raw_path.is_dir()):
+        return str(raw_path / f"etl-{date_str}.log")
+
+    if raw_path.suffix:
+        return str(raw_path.with_name(f"{raw_path.stem}-{date_str}{raw_path.suffix}"))
+
+    return str(raw_path.with_name(f"{raw_path.name}-{date_str}.log"))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Aplicação para consultar, baixar e carregar dados do CNPJ"
+    )
+    parser.add_argument(
+        "--log-file",
+        type=str,
+        help="Caminho do arquivo de log (append). Aceita {date} para rotação diária"
     )
 
     sub = parser.add_subparsers(dest="command", required=True)
@@ -106,6 +139,8 @@ def main() -> None:
     args = parser.parse_args()
 
     try:
+        set_log_file(_resolve_log_file_path(args.log_file))
+
         if args.command == "get-availables":
             data = CNPJDataScraper()
             print_log(data.get_availabes(), level="docs", time=False)

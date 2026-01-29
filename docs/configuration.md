@@ -25,11 +25,41 @@ As configurações também podem ser definidas via variáveis de ambiente:
 | `POSTGRES_DBNAME` | Nome do banco de dados |
 | `DOWNLOAD_PATH` | Diretório para downloads |
 | `IBGE_CSV_DIR` | Diretório dos CSVs do IBGE |
+| `LOG_FILE` | Caminho do arquivo de log (arquivo ou diretório) |
 
 ## Chaves Primárias, Estrangeiras e Índices
 
 As definições de chaves primárias, estrangeiras e índices podem ser encontradas em `src/rfb_cnpj_etl/db/schema.py`.
 Edite conforme a sua necessidade.
+
+---
+
+## Logs e Auditoria
+
+Por padrão, o CLI grava logs em `data/logs/etl-YYYY-MM-DD.log` (rotação diária simples).
+
+### Configuração via variável de ambiente
+
+Defina `LOG_FILE` para sobrescrever o caminho padrão. Exemplos:
+
+```bash
+# Diretório (gera etl-YYYY-MM-DD.log dentro dele)
+export LOG_FILE=data/logs/
+
+# Arquivo (insere a data antes da extensão)
+export LOG_FILE=data/logs/etl.log
+
+# Com placeholder de data
+export LOG_FILE=data/logs/etl-{date}.log
+```
+
+### Configuração via CLI
+
+Use `--log-file` para sobrescrever a variável de ambiente:
+
+```bash
+python etl.py complete --log-file /var/log/etl/etl-{date}.log
+```
 
 ---
 
@@ -97,4 +127,3 @@ psql -h localhost -U seu_usuario -d cnpj_rfb -f sql/general_improvements.sql
 - Extensões: `pg_trgm`, `pg_prewarm`, `pg_stat_statements`
 - Funções: `prewarm_critical_indexes()`, `vacuum_analyze_all()`, `table_statistics()`
 - Validações: `validate_cnpj_completo()`, `check_referential_integrity()`
-
