@@ -5,9 +5,9 @@
 # Suporta download, transformação e carga em PostgreSQL.
 #
 # Uso:
-#   docker compose run --rm etl complete --month 11/2025 --parallel
-#   docker compose run --rm etl download --month 11/2025
-#   docker compose run --rm etl db load --month 11/2025 --parallel
+#   docker compose run --rm etl complete --month 01/2026 --parallel
+#   docker compose run --rm etl download --month 01/2026
+#   docker compose run --rm etl db load --month 01/2026 --parallel
 # =============================================================================
 
 FROM python:3.13-slim

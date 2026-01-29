@@ -135,6 +135,8 @@ def main() -> None:
     p_complete.add_argument("--parallel", action="store_true")
     p_complete.add_argument("--clean", action="store_true")
     p_complete.add_argument("--workers", type=int)
+    p_complete.add_argument("--skip-views", action="store_true",
+                            help="Não cria Materialized Views ao final")
 
     args = parser.parse_args()
 
@@ -205,6 +207,11 @@ def main() -> None:
                 low_memory=getattr(args, "low_memory", DEFAULT_LOW_MEMORY),
                 parallel=args.parallel
             )
+            if not args.skip_views:
+                run_orchestrator(
+                    command="views-create",
+                    db_name=args.db_name
+                )
 
     except ValueError as e:
         print_log(str(e), level="error", time=False)

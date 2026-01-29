@@ -70,7 +70,7 @@ As Materialized Views pré-calculam estatísticas agregadas, reduzindo consultas
 ### Criação via CLI (Recomendado)
 
 ```bash
-# Criar/recriar todas as Materialized Views
+# Criar/recriar todas as Materialized Views (ou após usar --skip-views no complete)
 python etl.py db views create
 
 # Atualizar após nova carga de dados

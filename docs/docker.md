@@ -25,13 +25,13 @@ POSTGRES_DBNAME=dados_cnpj
 docker compose up -d postgres
 
 # Pipeline completo (download + carga + índices)
-docker compose run --rm etl complete --month 11/2025 --parallel
+docker compose run --rm etl complete --month 01/2026 --parallel
 
 # Apenas download
-docker compose run --rm etl download --month 11/2025 --workers 10
+docker compose run --rm etl download --month 01/2026 --workers 10
 
 # Apenas carga (arquivos já baixados)
-docker compose run --rm etl db load --month 11/2025 --parallel
+docker compose run --rm etl db load --month 01/2026 --parallel
 
 # Criar Materialized Views (opcional, após carga)
 docker compose run --rm etl db views create
@@ -70,7 +70,7 @@ cp .env.example .env
 # Edite .env conforme necessário
 
 docker compose up -d postgres
-docker compose run --rm etl complete --month 11/2025 --parallel
+docker compose run --rm etl complete --month 01/2026 --parallel
 ```
 
 ## Execução Direta com Docker Run
@@ -87,7 +87,7 @@ docker run --rm \
   -v ./data/downloads:/app/data/downloads \
   -v ./data/locations:/app/data/locations:ro \
   ghcr.io/brasildatahub/cnpj-etl:latest \
-  complete --month 11/2025 --parallel
+  complete --month 01/2026 --parallel
 ```
 
 ### Variáveis de Ambiente
@@ -121,13 +121,13 @@ docker run --rm \
   -e POSTGRES_DBNAME=dados_cnpj \
   -v ./data/downloads:/app/data/downloads \
   ghcr.io/brasildatahub/cnpj-etl:latest \
-  complete --month 11/2025 --parallel
+  complete --month 01/2026 --parallel
 
 # Apenas download
 docker run --rm \
   -v ./data/downloads:/app/data/downloads \
   ghcr.io/brasildatahub/cnpj-etl:latest \
-  download --month 11/2025 --workers 10
+  download --month 01/2026 --workers 10
 
 # Apenas carga (arquivos já baixados)
 docker run --rm \
@@ -138,7 +138,7 @@ docker run --rm \
   -e POSTGRES_DBNAME=dados_cnpj \
   -v ./data/downloads:/app/data/downloads \
   ghcr.io/brasildatahub/cnpj-etl:latest \
-  db load --month 11/2025 --parallel
+  db load --month 01/2026 --parallel
 
 # Criar Materialized Views (opcional, após carga)
 docker run --rm \

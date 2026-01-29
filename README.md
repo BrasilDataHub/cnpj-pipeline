@@ -32,7 +32,7 @@ cp .env.example .env
 # Edite .env com suas configurações
 
 docker compose up -d postgres
-docker compose run --rm etl complete --month 11/2025 --parallel
+docker compose run --rm etl complete --month 01/2026 --parallel
 ```
 
 > Requer [Docker](https://docs.docker.com/get-docker/) e [Docker Compose](https://docs.docker.com/compose/install/)
@@ -52,16 +52,16 @@ pip install -r requirements.txt
 ## Uso Básico
 
 ```bash
-# Pipeline completo (download + carga + índices)
-python etl.py complete --month 11/2025 --parallel --log-file data/logs/etl-{date}.log
+# Pipeline completo (download + carga + índices + views)
+python etl.py complete --month 01/2026 --parallel --log-file data/logs/etl-{date}.log
 
 # Apenas download
-python etl.py download --month 11/2025
+python etl.py download --month 01/2026
 
 # Apenas carga
-python etl.py db load --month 11/2025 --parallel
+python etl.py db load --month 01/2026 --parallel
 
-# Criar Materialized Views (opcional, após carga)
+# Criar Materialized Views manualmente (caso use --skip-views)
 python etl.py db views create
 
 # Atualizar Materialized Views

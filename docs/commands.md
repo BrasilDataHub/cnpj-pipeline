@@ -24,7 +24,7 @@ docker compose run --rm etl <comando> [opções]
 | `db fk` | Cria chaves estrangeiras |
 | `db views create` | Cria/recria Materialized Views |
 | `db views refresh` | Atualiza dados das Materialized Views |
-| `complete` | Executa todo o pipeline (download + carga) |
+| `complete` | Executa todo o pipeline (download + carga + views) |
 
 ---
 
@@ -57,7 +57,7 @@ python etl.py get-availables
 python etl.py get-latest
 
 # Exibe URLs de download para um mês
-python etl.py get-urls --month 11/2025
+python etl.py get-urls --month 01/2026
 ```
 
 ---
@@ -78,10 +78,10 @@ Baixa os arquivos ZIP de dados abertos do CNPJ diretamente do site da Receita Fe
 python etl.py download
 
 # Baixar mês específico
-python etl.py download --month 11/2025
+python etl.py download --month 01/2026
 
 # Baixar com limpeza prévia e 4 workers
-python etl.py download --month 11/2025 --clean --workers 4
+python etl.py download --month 01/2026 --clean --workers 4
 ```
 
 ---
@@ -117,13 +117,13 @@ Carrega os dados dos arquivos ZIP para o banco de dados.
 
 ```bash
 # Carga completa padrão (inclui todos os índices)
-python etl.py db load --month 11/2025
+python etl.py db load --month 01/2026
 
 # Carga apenas dados (sem extras)
-python etl.py db load --month 11/2025 --only-data
+python etl.py db load --month 01/2026 --only-data
 
 # Carga com paralelismo
-python etl.py db load --month 11/2025 --parallel
+python etl.py db load --month 01/2026 --parallel
 ```
 
 ---
@@ -202,7 +202,7 @@ python etl.py db views refresh --concurrent
 
 ## Comando `complete`
 
-Executa o pipeline completo: **download + carga** em sequência.
+Executa o pipeline completo: **download + carga + Materialized Views** em sequência.
 
 | Flag | Tipo | Padrão | Descrição |
 |------|------|--------|-----------|
@@ -215,10 +215,11 @@ Executa o pipeline completo: **download + carga** em sequência.
 | `--skip-validation` | flag | - | Ignora verificação dos arquivos |
 | `--low-memory` | flag | - | Ativa garbage collection |
 | `--parallel` | flag | - | Usa multi-threading |
+| `--skip-views` | flag | - | Não cria Materialized Views ao final |
 
 ```bash
-# Pipeline completo (inclui todos os índices automaticamente)
-python etl.py complete --month 11/2025 --parallel --clean
+# Pipeline completo (inclui índices e Materialized Views)
+python etl.py complete --month 01/2026 --parallel --clean
 ```
 
 ---
@@ -254,8 +255,8 @@ python etl.py db fk
 
 ```bash
 python etl.py db init
-python etl.py download --month 11/2025
-python etl.py db load --only-data --month 11/2025
+python etl.py download --month 01/2026
+python etl.py db load --only-data --month 01/2026
 python etl.py db patch
 python etl.py db pk
 python etl.py db index
