@@ -106,7 +106,7 @@ Cerca de **50GB**:
 | [Guia Docker](docs/docker.md) | Configuração, volumes, variáveis de ambiente, execução remota |
 | [Referência de Comandos](docs/commands.md) | Todos os comandos, flags e execução por etapas |
 | [Configuração](docs/configuration.md) | Personalização, variáveis de ambiente, scripts SQL |
-| [Exemplos de Consultas](sql/query_postgres.md) | Queries SQL para explorar os dados |
+| [Guia do Banco de Dados](docs/database.md) | Estrutura do banco, índices, MVs e consultas |
 
 ## Estrutura do Projeto
 

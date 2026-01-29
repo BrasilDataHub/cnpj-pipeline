@@ -1,0 +1,622 @@
+# Guia de Estrutura e Consultas PostgreSQL (Base CNPJ)
+
+Este documento serve como referência da **estrutura atual do banco** (tabelas, colunas, índices e materialized views) e traz exemplos de consultas.
+A fonte da verdade é o schema programático (`src/rfb_cnpj_etl/db/schema.py`), os índices avançados (`src/rfb_cnpj_etl/db/advanced_indexes.py`) e os SQLs em `sql/materialized_views/`.
+
+## Estrutura do Banco de Dados
+
+### Tabelas Principais (Carga CNPJ)
+
+#### `empresa`
+- **PK:** `cnpj_basico`
+- **Colunas:**
+  - `cnpj_basico` VARCHAR(8)
+  - `razao_social` VARCHAR(200)
+  - `cod_natureza_juridica` VARCHAR(4) NOT NULL
+  - `cod_qualificacao_responsavel` VARCHAR(2) NOT NULL
+  - `capital_social` NUMERIC(16,2) NOT NULL
+  - `cod_porte` VARCHAR(2)
+  - `ente_federativo_responsavel` VARCHAR(100)
+- **FKs:**
+  - `cod_natureza_juridica` -> `natureza_juridica.cod_natureza`
+  - `cod_qualificacao_responsavel` -> `qualificacao_socio.cod_qualificacao`
+
+#### `estabelecimento`
+- **PK:** `cnpj_completo`
+- **Colunas:**
+  - `cnpj_basico` VARCHAR(8) NOT NULL
+  - `cnpj_ordem` VARCHAR(4) NOT NULL
+  - `cnpj_dv` VARCHAR(2) NOT NULL
+  - `cnpj_completo` CHAR(14) NOT NULL
+  - `matriz_filial` VARCHAR(1) NOT NULL
+  - `nome_fantasia` VARCHAR(60)
+  - `cod_situacao_cadastral` VARCHAR(2) NOT NULL
+  - `data_situacao_cadastral` DATE
+  - `cod_motivo_situacao_cadastral` VARCHAR(2) NOT NULL
+  - `nome_cidade_exterior` VARCHAR(60)
+  - `cod_pais` VARCHAR(3)
+  - `data_inicio_atividade` DATE NOT NULL
+  - `cod_cnae_principal` VARCHAR(7) NOT NULL
+  - `cod_cnae_secundario` TEXT
+  - `tipo_logradouro` VARCHAR(20)
+  - `logradouro` VARCHAR(60)
+  - `numero` VARCHAR(6)
+  - `complemento` VARCHAR(200)
+  - `bairro` VARCHAR(60)
+  - `cep` VARCHAR(8)
+  - `uf` VARCHAR(2) NOT NULL
+  - `cod_municipio` VARCHAR(7)
+  - `ddd_telefone_1` VARCHAR(4)
+  - `telefone_1` VARCHAR(10)
+  - `ddd_telefone_2` VARCHAR(4)
+  - `telefone_2` VARCHAR(10)
+  - `ddd_fax` VARCHAR(4)
+  - `fax` VARCHAR(10)
+  - `email` TEXT
+  - `situacao_especial` VARCHAR(100)
+  - `data_situacao_especial` DATE
+  - `cod_regiao_ibge` INTEGER
+  - `cod_estado_ibge` INTEGER
+  - `cod_cidade_ibge` INTEGER
+- **FKs:**
+  - `cnpj_basico` -> `empresa.cnpj_basico`
+  - `cod_cnae_principal` -> `cnae.cod_cnae`
+  - `cod_pais` -> `pais.cod_pais`
+  - `cod_motivo_situacao_cadastral` -> `motivo.cod_motivo`
+  - `cod_regiao_ibge` -> `ibge_regiao.cod_regiao_ibge`
+  - `cod_estado_ibge` -> `ibge_estado.cod_estado_ibge`
+  - `cod_cidade_ibge` -> `ibge_cidade.cod_cidade_ibge`
+
+#### `socio`
+- **PK:** sem PK explícita
+- **Colunas:**
+  - `cnpj_basico` VARCHAR(8) NOT NULL
+  - `identificador_socio` VARCHAR(1) NOT NULL
+  - `nome_socio` VARCHAR(200)
+  - `cnpj_cpf_socio` VARCHAR(14)
+  - `cod_qualificacao_socio` VARCHAR(2) NOT NULL
+  - `data_entrada_sociedade` DATE NOT NULL
+  - `cod_pais` VARCHAR(3)
+  - `cpf_representante_legal` VARCHAR(11)
+  - `nome_representante_legal` VARCHAR(100)
+  - `cod_qualificacao_representante_legal` VARCHAR(2)
+  - `cod_faixa_etaria` VARCHAR(1) NOT NULL
+- **FKs:**
+  - `cnpj_basico` -> `empresa.cnpj_basico`
+  - `cod_pais` -> `pais.cod_pais`
+  - `cod_qualificacao_socio` -> `qualificacao_socio.cod_qualificacao`
+  - `cod_qualificacao_representante_legal` -> `qualificacao_socio.cod_qualificacao`
+
+#### `simples`
+- **PK:** `cnpj_basico`
+- **Colunas:**
+  - `cnpj_basico` VARCHAR(8)
+  - `opcao_simples` VARCHAR(1)
+  - `data_opcao_simples` DATE
+  - `data_exclusao_simples` DATE
+  - `opcao_mei` VARCHAR(1)
+  - `data_opcao_mei` DATE
+  - `data_exclusao_mei` DATE
+- **FKs:**
+  - `cnpj_basico` -> `empresa.cnpj_basico`
+
+#### `estabelecimento_cnae_sec`
+- **PK:** sem PK explícita
+- **Colunas:**
+  - `cnpj_completo` CHAR(14) NOT NULL
+  - `cod_cnae` VARCHAR(7) NOT NULL
+  - `cod_regiao_ibge` SMALLINT
+  - `cod_estado_ibge` SMALLINT
+  - `cod_cidade_ibge` INTEGER
+  - `data_inicio_atividade` DATE
+- **FKs:**
+  - `cnpj_completo` -> `estabelecimento.cnpj_completo`
+  - `cod_cnae` -> `cnae.cod_cnae`
+
+### Tabelas de Domínio (Lookup)
+
+#### `cnae`
+- **PK:** `cod_cnae`
+- **Colunas:** `cod_cnae` VARCHAR(7), `nome_cnae` VARCHAR(200) NOT NULL
+
+#### `natureza_juridica`
+- **PK:** `cod_natureza`
+- **Colunas:** `cod_natureza` VARCHAR(4), `nome_natureza` VARCHAR(200) NOT NULL
+
+#### `qualificacao_socio`
+- **PK:** `cod_qualificacao`
+- **Colunas:** `cod_qualificacao` VARCHAR(2), `nome_qualificacao` VARCHAR(200) NOT NULL
+
+#### `motivo`
+- **PK:** `cod_motivo`
+- **Colunas:** `cod_motivo` VARCHAR(2), `nome_motivo` VARCHAR(100) NOT NULL
+
+#### `pais`
+- **PK:** `cod_pais`
+- **Colunas:** `cod_pais` VARCHAR(3), `nome_pais` VARCHAR(60) NOT NULL
+
+#### `municipio_rfb`
+- **PK:** `cod_municipio`
+- **Colunas:** `cod_municipio` VARCHAR(7), `nome_municipio` VARCHAR(120) NOT NULL
+
+### Tabelas IBGE (Enriquecimento)
+
+#### `ibge_regiao`
+- **PK:** `cod_regiao_ibge`
+- **Colunas:**
+  - `cod_regiao_ibge` INTEGER
+  - `sigla_regiao` VARCHAR(2) UNIQUE
+  - `nome_regiao` VARCHAR(50) NOT NULL
+
+#### `ibge_estado`
+- **PK:** `cod_estado_ibge`
+- **Colunas:**
+  - `cod_estado_ibge` INTEGER
+  - `sigla_uf` VARCHAR(2) UNIQUE NOT NULL
+  - `nome_estado` VARCHAR(100) NOT NULL
+  - `latitude` NUMERIC(9,6)
+  - `longitude` NUMERIC(9,6)
+  - `cod_regiao_ibge` INTEGER NOT NULL
+- **FKs:** `cod_regiao_ibge` -> `ibge_regiao.cod_regiao_ibge`
+
+#### `ibge_cidade`
+- **PK:** `cod_cidade_ibge`
+- **Colunas:**
+  - `cod_cidade_ibge` INTEGER
+  - `nome_cidade` VARCHAR(120) NOT NULL
+  - `latitude` NUMERIC(9,6)
+  - `longitude` NUMERIC(9,6)
+  - `capital` BOOLEAN
+  - `cod_estado_ibge` INTEGER NOT NULL
+  - `cod_municipio` VARCHAR(7) UNIQUE
+  - `ddd` VARCHAR(3)
+  - `fuso_horario` VARCHAR(50)
+- **FKs:** `cod_estado_ibge` -> `ibge_estado.cod_estado_ibge`
+
+---
+
+## Índices
+
+### Índices Básicos (criados pelo ETL)
+
+#### `empresa`
+- `idx_empresa_cnpj` (`cnpj_basico`)
+- `idx_empresa_razao_social` (`razao_social`)
+- `idx_empresa_natureza` (`cod_natureza_juridica`)
+- `idx_empresa_porte` (`cod_porte`)
+
+#### `estabelecimento`
+- `idx_estab_empresa` (`cnpj_basico`)
+- `idx_estab_nome_fantasia` (`nome_fantasia`)
+- `idx_estab_cnae_principal` (`cod_cnae_principal`)
+- `idx_estab_data_inicio` (`data_inicio_atividade`)
+- `idx_estab_data_situacao` (`data_situacao_cadastral`)
+- `idx_estab_municipio` (`cod_municipio`)
+- `idx_estab_uf_municipio` (`uf`, `cod_municipio`)
+- `idx_estab_situacao` (`cod_situacao_cadastral`)
+- `idx_estab_regiao_ibge` (`cod_regiao_ibge`)
+- `idx_estab_estado_ibge` (`cod_estado_ibge`)
+- `idx_estab_cidade_ibge` (`cod_cidade_ibge`)
+
+#### `simples`
+- `idx_simples_opcoes` (`opcao_simples`, `opcao_mei`, `cnpj_basico`)
+
+#### `socio`
+- `idx_socio_empresa` (`cnpj_basico`)
+- `idx_socio_cpf_cnpj` (`cnpj_cpf_socio`)
+- `idx_socio_nome` (`nome_socio`)
+
+#### `estabelecimento_cnae_sec`
+- `idx_estab_cnae_sec_cnpj` (`cnpj_completo`)
+
+#### `ibge_regiao`
+- `idx_ibge_regiao_sigla` (`sigla_regiao`)
+
+#### `ibge_estado`
+- `idx_ibge_estado_sigla` (`sigla_uf`)
+- `idx_ibge_estado_regiao` (`cod_regiao_ibge`)
+
+#### `ibge_cidade`
+- `idx_ibge_cidade_estado` (`cod_estado_ibge`)
+- `idx_ibge_cidade_municipio` (`cod_municipio`)
+
+### Índices Avançados (opcionais, via `advanced_indexes.py`)
+
+#### `estabelecimento`
+- `idx_estab_cep` (`cep`)
+- `idx_estab_ddd` (`ddd_telefone_1`)
+- `idx_estab_regiao_estado` (`cod_regiao_ibge`, `cod_estado_ibge`)
+- `idx_estab_cnae_estado` (`cod_cnae_principal`, `cod_estado_ibge`)
+- `idx_estab_cnae_cidade` (`cod_cnae_principal`, `cod_cidade_ibge`)
+- `idx_estab_data_inicio_brin` BRIN (`data_inicio_atividade`) WITH (pages_per_range = 32)
+- `idx_estab_ativas` (`cod_situacao_cadastral`) WHERE `cod_situacao_cadastral = '02'`
+- `idx_estab_matriz_filial` (`matriz_filial`)
+- `idx_estab_cidade_ativas_cnpj` (`cod_cidade_ibge`, `cnpj_completo`) WHERE `cod_situacao_cadastral = '02'`
+- `idx_estab_estado_ativas_cnpj` (`cod_estado_ibge`, `cnpj_completo`) WHERE `cod_situacao_cadastral = '02'`
+- `idx_estab_regiao_ativas_cnpj` (`cod_regiao_ibge`, `cnpj_completo`) WHERE `cod_situacao_cadastral = '02'`
+- `idx_estab_nome_fantasia_trgm` GIN (`nome_fantasia gin_trgm_ops`)
+- `idx_estab_nome_fantasia_prefix` (`nome_fantasia varchar_pattern_ops`)
+- `idx_estab_email` (`email`) WHERE `email IS NOT NULL AND email != ''`
+- `idx_estab_telefone` (`telefone_1`) WHERE `telefone_1 IS NOT NULL AND telefone_1 != ''`
+- `idx_estab_email_hash` HASH (`email`)
+- `idx_estab_cnpj_completo_hash` HASH (`cnpj_completo`)
+- `idx_estab_prospeccao` (`cod_estado_ibge`, `cod_cnae_principal`, `cod_situacao_cadastral`)
+- `idx_estab_local_cnae` (`cod_cidade_ibge`, `cod_cnae_principal`, `matriz_filial`)
+- `idx_estab_novos_estado` (`data_inicio_atividade`, `cod_estado_ibge`)
+- `idx_estab_leads_email` (`cod_cnae_principal`, `cod_situacao_cadastral`) WHERE `email IS NOT NULL AND email != ''`
+- `idx_estab_temporal` (`cod_estado_ibge`, `cod_cnae_principal`, `data_inicio_atividade`)
+- `idx_estab_cidade_situacao_cnpj` (`cod_cidade_ibge`, `cod_situacao_cadastral`, `cnpj_completo`)
+- `idx_estab_estado_situacao_cnpj` (`cod_estado_ibge`, `cod_situacao_cadastral`, `cnpj_completo`)
+- `idx_estab_cidade_cnae_situacao` (`cod_cidade_ibge`, `cod_cnae_principal`, `cod_situacao_cadastral`)
+- `idx_estab_estado_cnae_situacao` (`cod_estado_ibge`, `cod_cnae_principal`, `cod_situacao_cadastral`)
+- `idx_estab_ddd1_covering` (`ddd_telefone_1`) INCLUDE (`cnpj_completo`, `cod_cidade_ibge`) WHERE `ddd_telefone_1 IS NOT NULL AND ddd_telefone_1 != ''`
+- `idx_estab_bairro_trgm` GIN (`bairro gin_trgm_ops`)
+- `idx_estab_email_prospeccao` (`cod_cidade_ibge`, `cnpj_completo`) WHERE `email IS NOT NULL AND email != '' AND email NOT ILIKE '%contab%'`
+
+#### `empresa`
+- `idx_empresa_capital` (`capital_social`)
+- `idx_empresa_razao_social_trgm` GIN (`razao_social gin_trgm_ops`)
+- `idx_empresa_razao_social_prefix` (`razao_social varchar_pattern_ops`)
+- `idx_empresa_porte_cnpj` (`cod_porte`, `cnpj_basico`)
+- `idx_empresa_natureza_cnpj` (`cod_natureza_juridica`, `cnpj_basico`)
+
+#### `estabelecimento_cnae_sec`
+- `idx_cnae_sec_cnae` (`cod_cnae`)
+- `idx_cnae_sec_covering` (`cod_cnae`) INCLUDE (`cnpj_completo`)
+- `idx_cnae_sec_cnae_estado` (`cod_cnae`, `cod_estado_ibge`)
+- `idx_cnae_sec_cnae_cidade` (`cod_cnae`, `cod_cidade_ibge`)
+- `idx_cnae_sec_cnae_regiao` (`cod_cnae`, `cod_regiao_ibge`)
+
+#### `socio`
+- `idx_socio_nome_trgm` GIN (`nome_socio gin_trgm_ops`)
+- `idx_socio_nome_prefix` (`nome_socio varchar_pattern_ops`)
+
+#### `simples`
+- `idx_simples_opcao_simples` (`cnpj_basico`) WHERE `opcao_simples = 'S'`
+- `idx_simples_opcao_mei` (`cnpj_basico`) WHERE `opcao_mei = 'S'`
+
+---
+
+## Materialized Views
+
+### Views Disponíveis e Estrutura
+
+#### `mv_stats_estado`
+- **Colunas:**
+  - `cod_estado_ibge`, `sigla_uf`, `nome_estado`, `cod_regiao_ibge`
+  - `total_estabelecimentos`, `ativos`, `matrizes_ativas`, `filiais_ativas`, `total_empresas`
+  - `novos_6meses`, `novos_1ano`
+- **Índices:**
+  - `idx_mv_stats_estado_pk` UNIQUE (`cod_estado_ibge`)
+  - `idx_mv_stats_estado_regiao` (`cod_regiao_ibge`)
+  - `idx_mv_stats_estado_sigla` (`sigla_uf`)
+
+#### `mv_stats_municipio`
+- **Colunas:**
+  - `cod_cidade_ibge`, `nome_cidade`, `cod_estado_ibge`, `sigla_uf`, `cod_regiao_ibge`
+  - `total_estabelecimentos`, `ativos`, `matrizes_ativas`, `filiais_ativas`, `total_empresas`
+  - `primeira_abertura`, `ultima_abertura`, `novos_6meses`, `novos_1ano`
+- **Índices:**
+  - `idx_mv_stats_municipio_pk` UNIQUE (`cod_cidade_ibge`)
+  - `idx_mv_stats_municipio_estado` (`cod_estado_ibge`)
+  - `idx_mv_stats_municipio_regiao` (`cod_regiao_ibge`)
+  - `idx_mv_stats_municipio_sigla` (`sigla_uf`)
+
+#### `mv_stats_cnae`
+- **Colunas:**
+  - `cod_cnae_principal`, `nome_cnae`
+  - `total_estabelecimentos`, `ativos`, `estados_presentes`, `cidades_presentes`
+  - `matrizes`, `com_email`, `com_telefone`, `novos_6meses`, `novos_1ano`, `novos_2anos`, `novos_4anos`
+- **Índices:**
+  - `idx_mv_stats_cnae_pk` UNIQUE (`cod_cnae_principal`)
+  - `idx_mv_stats_cnae_total` (`total_estabelecimentos` DESC)
+
+#### `mv_stats_cnae_estado`
+- **Colunas:**
+  - `cod_cnae_principal`, `cod_estado_ibge`, `total`, `ativos`, `com_email`, `matrizes`
+- **Índices:**
+  - `idx_mv_stats_cnae_estado_pk` UNIQUE (`cod_cnae_principal`, `cod_estado_ibge`)
+  - `idx_mv_stats_cnae_estado_cnae` (`cod_cnae_principal`)
+  - `idx_mv_stats_cnae_estado_estado` (`cod_estado_ibge`)
+
+#### `mv_abertura_periodo`
+- **Colunas:**
+  - `mes_abertura`, `cod_estado_ibge`, `total_aberturas`, `empresas_unicas`, `ainda_ativos`
+- **Índices:**
+  - `idx_mv_abertura_pk` UNIQUE (`mes_abertura`, `cod_estado_ibge`)
+  - `idx_mv_abertura_mes` (`mes_abertura`)
+  - `idx_mv_abertura_estado` (`cod_estado_ibge`)
+
+#### `mv_top_cnaes_cidade`
+- **Colunas:**
+  - `cod_cidade_ibge`, `cod_cnae_principal`, `nome_cnae`, `cod_estado_ibge`
+  - `total`, `ativos`, `novos_6meses`, `novos_1ano`, `ranking`
+- **Índices:**
+  - `idx_mv_top_cnaes_cidade_pk` UNIQUE (`cod_cidade_ibge`, `cod_cnae_principal`)
+  - `idx_mv_top_cnaes_cidade_cidade` (`cod_cidade_ibge`)
+  - `idx_mv_top_cnaes_cidade_cnae` (`cod_cnae_principal`)
+  - `idx_mv_top_cnaes_cidade_estado` (`cod_estado_ibge`)
+  - `idx_mv_top_cnaes_cidade_ranking` (`cod_cidade_ibge`, `ranking`)
+  - `idx_mv_top_cnaes_cidade_ativos` (`ativos` DESC)
+
+#### `mv_stats_cidade_situacao`
+- **Colunas:**
+  - `cod_cidade_ibge`, `cod_situacao_cadastral`, `total`, `matrizes`, `com_email`, `com_telefone`, `email_prospeccao`
+- **Índices:**
+  - `idx_mv_stats_cidade_situacao_pk` UNIQUE (`cod_cidade_ibge`, `cod_situacao_cadastral`)
+  - `idx_mv_stats_cidade_situacao_cidade` (`cod_cidade_ibge`)
+  - `idx_mv_stats_cidade_situacao_situacao` (`cod_situacao_cadastral`)
+
+#### `mv_regime_tributario_cidade`
+- **Colunas:**
+  - `cod_cidade_ibge`, `cod_estado_ibge`, `cod_regiao_ibge`, `cod_situacao_cadastral`
+  - `total`, `simples_nacional`, `mei`, `simples_ou_mei`, `lucro_presumido_real`
+- **Índices:**
+  - `idx_mv_regime_tributario_pk` UNIQUE (`cod_cidade_ibge`, `cod_situacao_cadastral`)
+  - `idx_mv_regime_tributario_estado` (`cod_estado_ibge`, `cod_situacao_cadastral`)
+  - `idx_mv_regime_tributario_regiao` (`cod_regiao_ibge`, `cod_situacao_cadastral`)
+
+#### `mv_porte_cidade`
+- **Colunas:**
+  - `cod_cidade_ibge`, `cod_estado_ibge`, `cod_regiao_ibge`, `cod_porte`, `cod_situacao_cadastral`
+  - `total`, `matrizes`, `com_email`
+- **Índices:**
+  - `idx_mv_porte_cidade_pk` UNIQUE (`cod_cidade_ibge`, `cod_porte`, `cod_situacao_cadastral`)
+  - `idx_mv_porte_cidade_estado` (`cod_estado_ibge`, `cod_porte`, `cod_situacao_cadastral`)
+  - `idx_mv_porte_cidade_porte` (`cod_porte`, `cod_situacao_cadastral`)
+
+#### `mv_stats_natureza_juridica_estado`
+- **Colunas:**
+  - `cod_natureza`, `cod_regiao_ibge`, `cod_estado_ibge`, `total`, `ativos`
+- **Índices:**
+  - `idx_mv_nj_est_pk` UNIQUE (`cod_natureza`, `cod_estado_ibge`)
+  - `idx_mv_nj_est_natureza` (`cod_natureza`)
+  - `idx_mv_nj_est_regiao` (`cod_regiao_ibge`)
+  - `idx_mv_nj_est_estado` (`cod_estado_ibge`)
+  - `idx_mv_nj_est_total` (`total` DESC)
+  - `idx_mv_nj_est_ativos` (`ativos` DESC)
+  - `idx_mv_nj_est_regiao_total` (`cod_regiao_ibge`, `total` DESC)
+  - `idx_mv_nj_est_nat_total` (`cod_natureza`, `total` DESC)
+
+#### `mv_stats_natureza_juridica_municipio`
+- **Colunas:**
+  - `cod_natureza`, `cod_estado_ibge`, `cod_cidade_ibge`, `total`, `ativos`
+- **Índices:**
+  - `idx_mv_nj_mun_pk` UNIQUE (`cod_natureza`, `cod_cidade_ibge`)
+  - `idx_mv_nj_mun_natureza` (`cod_natureza`)
+  - `idx_mv_nj_mun_estado` (`cod_estado_ibge`)
+  - `idx_mv_nj_mun_cidade` (`cod_cidade_ibge`)
+  - `idx_mv_nj_mun_total` (`total` DESC)
+  - `idx_mv_nj_mun_ativos` (`ativos` DESC)
+  - `idx_mv_nj_mun_estado_total` (`cod_estado_ibge`, `total` DESC)
+
+#### `mv_stats_natureza_juridica`
+- **Colunas:**
+  - `cod_natureza`, `nome_natureza`, `total`, `ativos`
+- **Índices:**
+  - `idx_mv_natureza_cod` UNIQUE (`cod_natureza`)
+  - `idx_mv_natureza_total` (`total` DESC)
+  - `idx_mv_natureza_ativos` (`ativos` DESC)
+  - `idx_mv_natureza_nome` (`nome_natureza`)
+  - `idx_mv_natureza_nome_trgm` GIN (`nome_natureza gin_trgm_ops`)
+
+#### `mv_stats_natureza_juridica_cnae`
+- **Colunas:**
+  - `cod_natureza`, `cod_cnae`, `total`
+- **Índices:**
+  - `idx_mv_nj_cnae_natureza` (`cod_natureza`)
+  - `idx_mv_nj_cnae_cnae` (`cod_cnae`)
+  - `idx_mv_nj_cnae_total` (`total` DESC)
+  - `idx_mv_nj_cnae_natureza_total` (`cod_natureza`, `total` DESC)
+
+### Função de Refresh
+
+- `refresh_all_mvs()` (definida em `sql/materialized_views/99_refresh_function.sql`)
+
+---
+
+## Consultas Básicas
+
+### Buscar empresa por CNPJ completo
+
+```sql
+SELECT 
+    est.cnpj_completo,
+    e.razao_social,
+    est.nome_fantasia,
+    est.uf,
+    cid.nome_cidade
+FROM estabelecimento est
+JOIN empresa e ON est.cnpj_basico = e.cnpj_basico
+LEFT JOIN ibge_cidade cid ON est.cod_cidade_ibge = cid.cod_cidade_ibge
+WHERE est.cnpj_completo = '12345678000100';
+```
+
+### Buscar empresa por CNPJ parcial (8 dígitos)
+
+```sql
+SELECT 
+    est.cnpj_completo,
+    e.razao_social,
+    CASE est.matriz_filial 
+        WHEN '1' THEN 'MATRIZ' 
+        WHEN '2' THEN 'FILIAL' 
+    END AS tipo
+FROM estabelecimento est
+JOIN empresa e ON est.cnpj_basico = e.cnpj_basico
+WHERE est.cnpj_basico = '12345678';
+```
+
+### Listar sócios de uma empresa
+
+```sql
+SELECT 
+    s.nome_socio,
+    q.nome_qualificacao AS qualificacao,
+    s.data_entrada_sociedade,
+    CASE s.identificador_socio
+        WHEN '1' THEN 'Pessoa Jurídica'
+        WHEN '2' THEN 'Pessoa Física'
+        WHEN '3' THEN 'Estrangeiro'
+    END AS tipo_socio
+FROM socio s
+JOIN qualificacao_socio q ON s.cod_qualificacao_socio = q.cod_qualificacao
+WHERE s.cnpj_basico = '12345678'
+ORDER BY s.data_entrada_sociedade;
+```
+
+---
+
+## Consultas com Localização (IBGE)
+
+### Estabelecimentos por estado
+
+```sql
+SELECT 
+    uf.sigla_uf,
+    uf.nome_estado,
+    COUNT(*) AS total_estabelecimentos,
+    COUNT(*) FILTER (WHERE est.cod_situacao_cadastral = '02') AS ativos
+FROM estabelecimento est
+JOIN ibge_estado uf ON est.cod_estado_ibge = uf.cod_estado_ibge
+GROUP BY uf.sigla_uf, uf.nome_estado
+ORDER BY total_estabelecimentos DESC;
+```
+
+### Estabelecimentos por cidade com coordenadas
+
+```sql
+SELECT 
+    cid.nome_cidade,
+    uf.sigla_uf,
+    cid.latitude,
+    cid.longitude,
+    COUNT(*) AS total
+FROM estabelecimento est
+JOIN ibge_cidade cid ON est.cod_cidade_ibge = cid.cod_cidade_ibge
+JOIN ibge_estado uf ON cid.cod_estado_ibge = uf.cod_estado_ibge
+WHERE est.cod_situacao_cadastral = '02'
+GROUP BY cid.nome_cidade, uf.sigla_uf, cid.latitude, cid.longitude
+ORDER BY total DESC
+LIMIT 20;
+```
+
+### Empresas por região
+
+```sql
+SELECT 
+    r.nome_regiao,
+    COUNT(DISTINCT est.cnpj_basico) AS total_empresas,
+    COUNT(*) AS total_estabelecimentos
+FROM estabelecimento est
+JOIN ibge_regiao r ON est.cod_regiao_ibge = r.cod_regiao_ibge
+WHERE est.cod_situacao_cadastral = '02'
+GROUP BY r.nome_regiao
+ORDER BY total_empresas DESC;
+```
+
+---
+
+## Consultas com CNAEs
+
+### CNAEs secundários de um estabelecimento
+
+```sql
+SELECT 
+    sec.cnpj_completo,
+    sec.cod_cnae,
+    cn.nome_cnae
+FROM estabelecimento_cnae_sec sec
+JOIN cnae cn ON sec.cod_cnae = cn.cod_cnae
+WHERE sec.cnpj_completo = '12345678000100';
+```
+
+### Empresas por CNAE em um estado
+
+```sql
+SELECT 
+    cn.cod_cnae,
+    cn.nome_cnae,
+    COUNT(*) AS total
+FROM estabelecimento est
+JOIN cnae cn ON est.cod_cnae_principal = cn.cod_cnae
+WHERE est.cod_estado_ibge = 35
+  AND est.cod_situacao_cadastral = '02'
+GROUP BY cn.cod_cnae, cn.nome_cnae
+ORDER BY total DESC
+LIMIT 20;
+```
+
+---
+
+## Consultas com Materialized Views
+
+### Estatísticas por estado
+
+```sql
+SELECT 
+    sigla_uf,
+    nome_estado,
+    total_estabelecimentos,
+    ativos,
+    matrizes_ativas,
+    total_empresas,
+    novos_1ano
+FROM mv_stats_estado
+ORDER BY total_estabelecimentos DESC;
+```
+
+### Top 10 municípios por total de empresas
+
+```sql
+SELECT 
+    nome_cidade,
+    sigla_uf,
+    total_empresas,
+    ativos,
+    novos_6meses
+FROM mv_stats_municipio
+ORDER BY total_empresas DESC
+LIMIT 10;
+```
+
+### CNAEs mais comuns no país
+
+```sql
+SELECT 
+    cod_cnae_principal,
+    nome_cnae,
+    total_estabelecimentos,
+    ativos,
+    estados_presentes
+FROM mv_stats_cnae
+ORDER BY total_estabelecimentos DESC
+LIMIT 20;
+```
+
+### Evolução de aberturas por mês em SP
+
+```sql
+SELECT 
+    mes_abertura,
+    total_aberturas,
+    empresas_unicas,
+    ainda_ativos
+FROM mv_abertura_periodo
+WHERE cod_estado_ibge = 35
+  AND mes_abertura >= '2023-01-01'
+ORDER BY mes_abertura;
+```
+
+### Top CNAEs por cidade específica
+
+```sql
+SELECT 
+    cod_cnae_principal,
+    nome_cnae,
+    total,
+    ranking
+FROM mv_top_cnaes_cidade
+WHERE cod_cidade_ibge = 3550308
+ORDER BY ranking;
+```
