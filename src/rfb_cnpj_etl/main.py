@@ -206,7 +206,7 @@ def main() -> None:
                 month_year=getattr(args, "month", None),
                 files_dir=getattr(args, "download_dir", None),
                 skip_indexes=getattr(args, "skip_index", False),
-                skip_validation=getattr(args, "skip_validation", False),
+                skip_validation=args.skip_download or getattr(args, "skip_validation", False),
                 low_memory=getattr(args, "low_memory", DEFAULT_LOW_MEMORY),
                 parallel=args.parallel
             )
