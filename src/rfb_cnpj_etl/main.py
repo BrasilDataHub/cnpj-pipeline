@@ -135,6 +135,8 @@ def main() -> None:
     p_complete.add_argument("--parallel", action="store_true")
     p_complete.add_argument("--clean", action="store_true")
     p_complete.add_argument("--workers", type=int)
+    p_complete.add_argument("--skip-download", action="store_true",
+                            help="Não baixa os arquivos, apenas executa as etapas do banco de dados")
     p_complete.add_argument("--skip-views", action="store_true",
                             help="Não cria Materialized Views ao final")
 
@@ -189,13 +191,14 @@ def main() -> None:
                 )
 
         elif args.command == "complete":
-            dm = CNPJDownloadManager(
-                month_year=args.month,
-                concurrents=args.workers,
-                clean=args.clean,
-                download_dir=args.download_dir,
-            )
-            dm.start_download_queue()
+            if not args.skip_download:
+                dm = CNPJDownloadManager(
+                    month_year=args.month,
+                    concurrents=args.workers,
+                    clean=args.clean,
+                    download_dir=args.download_dir,
+                )
+                dm.start_download_queue()
 
             run_orchestrator(
                 command="load",

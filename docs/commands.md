@@ -215,11 +215,15 @@ Executa o pipeline completo: **download + carga + Materialized Views** em sequê
 | `--skip-validation` | flag | - | Ignora verificação dos arquivos |
 | `--low-memory` | flag | - | Ativa garbage collection |
 | `--parallel` | flag | - | Usa multi-threading |
+| `--skip-download` | flag | - | Não baixa os arquivos, executa apenas as etapas do banco |
 | `--skip-views` | flag | - | Não cria Materialized Views ao final |
 
 ```bash
 # Pipeline completo (inclui índices e Materialized Views)
 python etl.py complete --month 01/2026 --parallel --clean
+
+# Apenas etapas do banco (arquivos já baixados)
+python etl.py complete --month 01/2026 --parallel --skip-download
 ```
 
 ---

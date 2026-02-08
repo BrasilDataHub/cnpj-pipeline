@@ -55,6 +55,9 @@ pip install -r requirements.txt
 # Pipeline completo (download + carga + índices + views)
 python etl.py complete --month 01/2026 --parallel --log-file data/logs/etl-{date}.log
 
+# Pipeline sem download (arquivos já baixados)
+python etl.py complete --month 01/2026 --parallel --skip-download
+
 # Apenas download
 python etl.py download --month 01/2026
 
