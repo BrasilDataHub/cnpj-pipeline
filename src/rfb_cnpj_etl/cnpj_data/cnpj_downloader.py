@@ -15,7 +15,6 @@ from typing import Dict, Optional
 from .cnpj_public_data import CNPJDataScraper
 from ..utils.logger import print_log, get_timestamp
 from ..config import (
-    CNPJ_DATA_URL,
     DOWNLOAD_DIR, DOWNLOAD_MAX_CONCURRENTS, BROWSER_AGENTS,
     DOWNLOAD_CHUNK_SIZE, DOWNLOAD_CHUNK_TIMEOUT, DOWNLOAD_MAX_RETRIES
 )
@@ -217,7 +216,7 @@ class CNPJDownloadManager:
         if not concurrents:
             concurrents = DOWNLOAD_MAX_CONCURRENTS  # se não fornecido, usa DOWNLOAD_MAX_CONCURRENTS
 
-        self.cnpj_data_url = CNPJ_DATA_URL  # url base para acesso aos dados
+
         self.agents = BROWSER_AGENTS  # lista de agentes de navegador
         self.session = requests.Session()  # cria uma sessão HTTP persistente
         self.month_year = month_year  # mês/ano para baixar

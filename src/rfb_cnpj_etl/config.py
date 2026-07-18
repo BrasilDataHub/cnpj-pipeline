@@ -56,7 +56,14 @@ IBGE_CIDADES_CSV = IBGE_CSV_DIR / "cities.csv"
 # ---------------------------------------------------------------------------
 # LINKS
 # ---------------------------------------------------------------------------
+# [LEGADO] URL antiga da RFB — não funcional após migração para WebDAV (Nextcloud)
 CNPJ_DATA_URL = "https://arquivos.receitafederal.gov.br/dados/cnpj/dados_abertos_cnpj/"
+
+# URL base WebDAV (Nextcloud) da Receita Federal — configurável via variável de ambiente
+CNPJ_WEBDAV_BASE_URL = (
+    os.getenv("RFB_WEBDAV_URL")
+    or "https://arquivos.receitafederal.gov.br/public.php/dav/files/gn672Ad4CF8N6TK/Dados/Cadastros/CNPJ/"
+)
 
 # ---------------------------------------------------------------------------
 # BANCO DE DADOS (PostgreSQL)
