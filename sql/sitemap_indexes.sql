@@ -72,9 +72,8 @@ ON estabelecimento (cod_estado_ibge, cod_cidade_ibge, cod_cnae_principal);
 
 SELECT
     indexname,
-    pg_size_pretty(pg_relation_size(indexrelid)) as tamanho
+    pg_size_pretty(pg_relation_size(quote_ident(indexname)::regclass)) as tamanho
 FROM pg_indexes
-JOIN pg_class ON pg_class.relname = pg_indexes.indexname
 WHERE tablename = 'estabelecimento'
   AND indexname IN (
     'idx_estab_estado_matriz_cnpj',
