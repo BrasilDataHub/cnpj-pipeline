@@ -390,6 +390,49 @@ ADVANCED_INDEXES = [
         'where': "email IS NOT NULL AND email != '' AND email NOT ILIKE '%contab%'",
         'comment': 'Emails válidos excluindo contabilidades'
     },
+
+    # =========================================================================
+    # OTIMIZAÇÃO: SITEMAPS
+    # Índices compostos para queries de geração de sitemaps.
+    # Complementam os índices existentes que possuem ordem de colunas invertida
+    # e não atendem eficientemente filtros que começam por cod_estado_ibge.
+    # =========================================================================
+
+    # -------------------------------------------------------------------------
+    # Empresas por UF (company.py → _generate_company_urls_for_state)
+    # Query: WHERE matriz_filial = '1' AND cod_estado_ibge = %s ORDER BY cnpj_basico
+    # Existente idx_estab_estado_ibge é simples; este composto elimina sort.
+    # -------------------------------------------------------------------------
+    {
+        'name': 'idx_estab_estado_matriz_cnpj',
+        'table': 'estabelecimento',
+        'columns': ['cod_estado_ibge', 'matriz_filial', 'cnpj_basico'],
+        'comment': 'Sitemap: empresas por UF com ORDER BY cnpj_basico'
+    },
+
+    # -------------------------------------------------------------------------
+    # CNAEs por estado (cnae.py → _get_state_cnaes)
+    # Query: WHERE cod_estado_ibge = %s GROUP BY cod_cnae ...
+    # Existente idx_estab_cnae_estado tem ordem invertida (cnae, estado).
+    # -------------------------------------------------------------------------
+    {
+        'name': 'idx_estab_estado_cnae',
+        'table': 'estabelecimento',
+        'columns': ['cod_estado_ibge', 'cod_cnae_principal'],
+        'comment': 'Sitemap: agregação CNAE filtrada por estado'
+    },
+
+    # -------------------------------------------------------------------------
+    # CNAEs por cidade (cnae.py → _get_city_cnaes)
+    # Query: WHERE cod_estado_ibge = %s GROUP BY cod_cidade_ibge, cod_cnae ...
+    # Query mais pesada do fluxo; nenhum índice existente cobre este padrão.
+    # -------------------------------------------------------------------------
+    {
+        'name': 'idx_estab_estado_cidade_cnae',
+        'table': 'estabelecimento',
+        'columns': ['cod_estado_ibge', 'cod_cidade_ibge', 'cod_cnae_principal'],
+        'comment': 'Sitemap: agregação CNAE por cidade filtrada por estado'
+    },
 ]
 
 
