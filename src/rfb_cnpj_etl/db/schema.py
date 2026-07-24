@@ -121,6 +121,10 @@ SCHEMA = {
         ],
         'indexes': [
             {'name': 'idx_empresa_cnpj', 'columns': ['cnpj_basico']},
+            # idx_empresa_razao_social (3,7 GB): remoção CONDICIONAL — o
+            # website ainda ordena por razao_social (sort=corporate_name);
+            # só remover quando nenhum ORDER BY razao_social sobreviver
+            # (pós-AG14). Ver docs/index_cleanup.md.
             {'name': 'idx_empresa_razao_social', 'columns': ['razao_social']},
             {'name': 'idx_empresa_natureza', 'columns': ['cod_natureza_juridica']},
             {'name': 'idx_empresa_porte', 'columns': ['cod_porte']}
@@ -174,18 +178,18 @@ SCHEMA = {
             {'columns': ['cod_estado_ibge'], 'references': 'ibge_estado(cod_estado_ibge)'},
             {'columns': ['cod_cidade_ibge'], 'references': 'ibge_cidade(cod_cidade_ibge)'}
         ],
+        # Índices redundantes removidos em 2026-07 (AG9, ~3 GB nesta lista):
+        # idx_estab_cnae_principal, idx_estab_data_inicio, idx_estab_situacao,
+        # idx_estab_regiao_ibge, idx_estab_estado_ibge e idx_estab_cidade_ibge
+        # eram prefixos exatos de índices compostos existentes (ou tinham
+        # seletividade baixa demais para valer 0,5 GB cada). Justificativas e
+        # protocolo de remoção em produção: docs/index_cleanup.md.
         'indexes': [
             {'name': 'idx_estab_empresa', 'columns': ['cnpj_basico']},
             {'name': 'idx_estab_nome_fantasia', 'columns': ['nome_fantasia']},
-            {'name': 'idx_estab_cnae_principal', 'columns': ['cod_cnae_principal']},
-            {'name': 'idx_estab_data_inicio', 'columns': ['data_inicio_atividade']},
             {'name': 'idx_estab_data_situacao', 'columns': ['data_situacao_cadastral']},
             {'name': 'idx_estab_municipio', 'columns': ['cod_municipio']},
-            {'name': 'idx_estab_uf_municipio', 'columns': ['uf', 'cod_municipio']},
-            {'name': 'idx_estab_situacao', 'columns': ['cod_situacao_cadastral']},
-            {'name': 'idx_estab_regiao_ibge', 'columns': ['cod_regiao_ibge']},
-            {'name': 'idx_estab_estado_ibge', 'columns': ['cod_estado_ibge']},
-            {'name': 'idx_estab_cidade_ibge', 'columns': ['cod_cidade_ibge']}
+            {'name': 'idx_estab_uf_municipio', 'columns': ['uf', 'cod_municipio']}
         ]
     },
     'simples': {

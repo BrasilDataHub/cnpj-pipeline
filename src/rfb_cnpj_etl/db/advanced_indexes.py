@@ -15,8 +15,13 @@ Espaço estimado: ~20 GB (adicional aos índices do ETL)
 Tempo estimado de criação: 30-45 minutos (com paralelismo)
 """
 
-# Extensões necessárias para os índices avançados
-REQUIRED_EXTENSIONS = ['pg_trgm']
+# Extensões necessárias para os índices avançados e para a operação do banco:
+# - pg_trgm: busca textual com ILIKE '%termo%' (índices GIN trigram)
+# - unaccent: normalização de acentos no dado (tabela de busca enxuta, AG13)
+# - pg_stat_statements: diagnóstico de queries em produção; a coleta exige
+#   shared_preload_libraries=pg_stat_statements na instância (config em infra/),
+#   mas o CREATE EXTENSION é seguro mesmo sem o preload.
+REQUIRED_EXTENSIONS = ['pg_trgm', 'unaccent', 'pg_stat_statements']
 
 # Configurações de performance para criação de índices
 INDEX_CREATION_CONFIG = {
@@ -39,15 +44,12 @@ ADVANCED_INDEXES = [
     # =========================================================================
     # ESTABELECIMENTO - Localização (complementares)
     # =========================================================================
+    # idx_estab_ddd removido (AG9): coberto por idx_estab_ddd1_covering
+    # (parcial + covering). Ver docs/index_cleanup.md.
     {
         'name': 'idx_estab_cep',
         'table': 'estabelecimento',
         'columns': ['cep']
-    },
-    {
-        'name': 'idx_estab_ddd',
-        'table': 'estabelecimento',
-        'columns': ['ddd_telefone_1']
     },
     {
         'name': 'idx_estab_regiao_estado',
@@ -83,16 +85,13 @@ ADVANCED_INDEXES = [
     # =========================================================================
     # ESTABELECIMENTO - Situação Cadastral / Tipo
     # =========================================================================
+    # idx_estab_matriz_filial removido (AG9): cardinalidade 2, inútil como
+    # índice isolado. Ver docs/index_cleanup.md.
     {
         'name': 'idx_estab_ativas',
         'table': 'estabelecimento',
         'columns': ['cod_situacao_cadastral'],
         'where': "cod_situacao_cadastral = '02'"
-    },
-    {
-        'name': 'idx_estab_matriz_filial',
-        'table': 'estabelecimento',
-        'columns': ['matriz_filial']
     },
 
     # =========================================================================
@@ -123,18 +122,15 @@ ADVANCED_INDEXES = [
     # =========================================================================
     # ESTABELECIMENTO - Busca Textual (GIN + pg_trgm)
     # =========================================================================
+    # idx_estab_nome_fantasia_prefix removido (AG9): com collation C do
+    # banco, o btree comum idx_estab_nome_fantasia já atende prefixo —
+    # o varchar_pattern_ops era duplicata exata (1,0 GB).
     {
         'name': 'idx_estab_nome_fantasia_trgm',
         'table': 'estabelecimento',
         'type': 'GIN',
         'columns': ['nome_fantasia'],
         'ops': 'gin_trgm_ops'
-    },
-    {
-        'name': 'idx_estab_nome_fantasia_prefix',
-        'table': 'estabelecimento',
-        'columns': ['nome_fantasia'],
-        'ops': 'varchar_pattern_ops'
     },
 
     # =========================================================================
@@ -160,14 +156,10 @@ ADVANCED_INDEXES = [
     },
 
     # =========================================================================
-    # ESTABELECIMENTO - CNPJ Completo (HASH para lookup ultra-rápido)
+    # ESTABELECIMENTO - CNPJ Completo
+    # idx_estab_cnpj_completo_hash removido (AG9): a PK btree já resolve
+    # igualdade; o hash era duplicata de 2,0 GB sem ganho mensurável.
     # =========================================================================
-    {
-        'name': 'idx_estab_cnpj_completo_hash',
-        'table': 'estabelecimento',
-        'type': 'HASH',
-        'columns': ['cnpj_completo']
-    },
 
     # =========================================================================
     # ESTABELECIMENTO - Compostos (Consultas Reais de Negócio)
@@ -207,18 +199,14 @@ ADVANCED_INDEXES = [
         'table': 'empresa',
         'columns': ['capital_social']
     },
+    # idx_empresa_razao_social_prefix removido (AG9): duplicata exata do
+    # btree idx_empresa_razao_social com collation C (3,7 GB).
     {
         'name': 'idx_empresa_razao_social_trgm',
         'table': 'empresa',
         'type': 'GIN',
         'columns': ['razao_social'],
         'ops': 'gin_trgm_ops'
-    },
-    {
-        'name': 'idx_empresa_razao_social_prefix',
-        'table': 'empresa',
-        'columns': ['razao_social'],
-        'ops': 'varchar_pattern_ops'
     },
 
     # =========================================================================
@@ -254,18 +242,14 @@ ADVANCED_INDEXES = [
     # =========================================================================
     # SÓCIO (complementares)
     # =========================================================================
+    # idx_socio_nome_prefix removido (AG9): duplicata exata do btree
+    # idx_socio_nome com collation C (0,8 GB).
     {
         'name': 'idx_socio_nome_trgm',
         'table': 'socio',
         'type': 'GIN',
         'columns': ['nome_socio'],
         'ops': 'gin_trgm_ops'
-    },
-    {
-        'name': 'idx_socio_nome_prefix',
-        'table': 'socio',
-        'columns': ['nome_socio'],
-        'ops': 'varchar_pattern_ops'
     },
 
     # =========================================================================

@@ -66,8 +66,10 @@ class PostgresBuilder:
 
     def enable_extensions(self):
         """
-        Habilita extensões necessárias para índices avançados.
-        Extensões habilitadas: pg_trgm (busca textual com trigrams).
+        Habilita extensões necessárias para índices avançados e operação.
+        Extensões habilitadas: pg_trgm (busca textual com trigrams),
+        unaccent (normalização de acentos) e pg_stat_statements
+        (diagnóstico de queries; coleta ativa exige preload na instância).
         """
         try:
             print_log("HABILITANDO EXTENSÕES...", level="task")
@@ -180,6 +182,62 @@ class PostgresBuilder:
         """
         self.apply_patches()
         self.add_primary_keys()
+
+    def set_tables_logged(self):
+        """
+        Converte as tabelas de UNLOGGED para LOGGED ao final da carga.
+
+        O ETL cria tudo UNLOGGED para acelerar o COPY (sem WAL), mas tabela
+        UNLOGGED não sobrevive a crash: o PostgreSQL TRUNCA o conteúdo no
+        recovery — um simples crash da instância perderia a base inteira.
+        LOGGED também é pré-condição para backup físico/PITR e réplicas.
+
+        Custo: reescrita completa com WAL, tabela a tabela (estimativa de
+        +1–3 h nas 5 tabelas grandes; `max_wal_size` alto reduz checkpoints).
+        A conversão é feita logo após a carga/patches e antes de PKs e
+        índices — com menos relações existindo, menos bytes são reescritos.
+
+        Idempotente: consulta relpersistence e só converte o que ainda é 'u'.
+
+        Pode ser executado independentemente via: python etl.py db logged
+        """
+        try:
+            print_log("CONVERTENDO TABELAS PARA LOGGED...", level="task")
+            if self.conn is None:
+                self.conn = self._connect()
+            self.conn.autocommit = True
+            cur = self.conn.cursor()
+
+            cur.execute("""
+                SELECT relname
+                FROM pg_class c
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE n.nspname = 'public'
+                  AND c.relkind = 'r'
+                  AND c.relpersistence = 'u'
+                ORDER BY pg_total_relation_size(c.oid);
+            """)
+            unlogged = [row[0] for row in cur.fetchall()]
+
+            if not unlogged:
+                print_log("NENHUMA TABELA UNLOGGED ENCONTRADA", level="docs")
+                return
+
+            total = len(unlogged)
+            width = len(str(total))
+            for i, table_name in enumerate(unlogged, start=1):
+                start_time = time.time()
+                cur.execute(f'ALTER TABLE public."{table_name}" SET LOGGED;')
+                elapsed = time.time() - start_time
+                print_log(
+                    f"[{i:0{width}}/{total}] LOGGED: {table_name} ({elapsed:.1f}s)",
+                    level="docs"
+                )
+
+            print_log("TABELAS CONVERTIDAS PARA LOGGED", level="success")
+        except psycopg2.Error as e:
+            print_log(f"ERRO AO CONVERTER TABELAS PARA LOGGED: {e}", level="error")
+            raise
 
     def enable_foreign_keys(self):
         """Cria as chaves estrangeiras definidas no SCHEMA."""

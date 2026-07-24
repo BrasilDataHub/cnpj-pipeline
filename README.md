@@ -70,6 +70,9 @@ python etl.py db views create
 # Atualizar Materialized Views
 python etl.py db views refresh --concurrent
 
+# Converter tabelas UNLOGGED para LOGGED manualmente (já roda no pipeline)
+python etl.py db logged
+
 # Listar meses disponíveis
 python etl.py get-availables
 
@@ -101,6 +104,22 @@ Cerca de **50GB**:
 > Os arquivos `.zip` são lidos diretamente, sem extração no disco.
 
 **Recomenda-se ter ao menos 70 GB livres** para garantir estabilidade durante a execução.
+
+## Durabilidade (UNLOGGED → LOGGED)
+
+A carga cria as tabelas como `UNLOGGED` para acelerar o `COPY` (sem WAL).
+Ao final da carga — logo após os patches e **antes** de PKs/índices — o
+pipeline converte todas as tabelas para `LOGGED` (`ALTER TABLE ... SET LOGGED`).
+Sem essa conversão, um crash do PostgreSQL **trunca** as tabelas UNLOGGED no
+recovery (perda total dos dados); LOGGED também é pré-condição para backup
+físico/PITR e réplicas.
+
+Custo da conversão: reescrita completa com WAL, tabela a tabela — estimativa
+de **+1–3 h** na janela mensal para as 5 tabelas grandes (`estabelecimento`,
+`empresa`, `socio`, `simples`, `estabelecimento_cnae_sec`). Um `max_wal_size`
+alto (≥4 GB) reduz checkpoints durante a conversão. A etapa é idempotente
+(só converte o que ainda é UNLOGGED) e pode ser executada isoladamente com
+`python etl.py db logged`.
 
 ## Documentação
 
