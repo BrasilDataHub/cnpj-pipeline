@@ -37,6 +37,7 @@ def run_orchestrator(
         - init: Cria schema e tabelas
         - load: Carrega dados (com ou sem --only-data)
         - patch: Aplica correções estáticas na base
+        - logged: Converte tabelas UNLOGGED para LOGGED (durabilidade)
         - pk: Adiciona chaves primárias
         - index: Cria todos os índices (básicos + avançados)
         - fk: Cria chaves estrangeiras
@@ -122,6 +123,16 @@ def run_orchestrator(
         builder.apply_patches()
     elif command == "load" and not only_data:
         builder.apply_patches()
+
+    # =========================================================================
+    # ETAPA 3.5: Converter tabelas para LOGGED (logged ou load sem --only-data)
+    # Antes de PKs/índices: com menos relações, a reescrita com WAL é menor.
+    # UNLOGGED não sobrevive a crash — sem esta etapa, um crash trunca a base.
+    # =========================================================================
+    if command == "logged":
+        builder.set_tables_logged()
+    elif command == "load" and not only_data:
+        builder.set_tables_logged()
 
     # =========================================================================
     # ETAPA 4: Criar chaves primárias (pk ou load sem --only-data)

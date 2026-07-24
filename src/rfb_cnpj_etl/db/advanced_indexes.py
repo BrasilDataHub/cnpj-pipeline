@@ -15,8 +15,13 @@ Espaço estimado: ~20 GB (adicional aos índices do ETL)
 Tempo estimado de criação: 30-45 minutos (com paralelismo)
 """
 
-# Extensões necessárias para os índices avançados
-REQUIRED_EXTENSIONS = ['pg_trgm']
+# Extensões necessárias para os índices avançados e para a operação do banco:
+# - pg_trgm: busca textual com ILIKE '%termo%' (índices GIN trigram)
+# - unaccent: normalização de acentos no dado (tabela de busca enxuta, AG13)
+# - pg_stat_statements: diagnóstico de queries em produção; a coleta exige
+#   shared_preload_libraries=pg_stat_statements na instância (config em infra/),
+#   mas o CREATE EXTENSION é seguro mesmo sem o preload.
+REQUIRED_EXTENSIONS = ['pg_trgm', 'unaccent', 'pg_stat_statements']
 
 # Configurações de performance para criação de índices
 INDEX_CREATION_CONFIG = {

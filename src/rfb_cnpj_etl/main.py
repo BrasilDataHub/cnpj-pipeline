@@ -100,6 +100,10 @@ def main() -> None:
     p_patch = db_sub.add_parser("patch", help="Aplica correções estáticas na base de dados")
     p_patch.add_argument("--db-name", type=str, default=POSTGRES["database"])
 
+    # db-logged
+    p_logged = db_sub.add_parser("logged", help="Converte tabelas UNLOGGED para LOGGED (durabilidade)")
+    p_logged.add_argument("--db-name", type=str, default=POSTGRES["database"])
+
     # db-pk
     p_pk = db_sub.add_parser("pk", help="Adiciona chaves primárias nas tabelas grandes")
     p_pk.add_argument("--db-name", type=str, default=POSTGRES["database"])
