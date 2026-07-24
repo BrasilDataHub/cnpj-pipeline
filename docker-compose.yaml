@@ -1,6 +1,11 @@
 services:
   postgres:
-    image: postgres:17
+    # Imagem da nossa infra (repositório infra/, publicada pela CI no GHCR —
+    # pull anônimo): postgres:17 + postgresql.conf gerado no start a partir
+    # das envs PG_* (defaults = cenário atual, host compartilhado) + initdb
+    # com pg_trgm/unaccent/pg_stat_statements/btree_gin e role dados_read.
+    # Cenários de tuning por máquina: infra/postgres/README.md.
+    image: ghcr.io/brasildatahub/postgres:17
     container_name: rfb-cnpj-postgres
     restart: always
     healthcheck:
@@ -14,16 +19,30 @@ services:
       POSTGRES_DB: ${POSTGRES_DBNAME:-dados_cnpj}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      # Otimizações de performance para carga massiva
+      # Collation C é premissa de performance da base (LIKE 'prefixo%' usa
+      # btree comum) — só vale na PRIMEIRA inicialização (volume vazio).
       POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+      # Senha do role de leitura do website (initdb; opcional em ambiente ETL)
+      DADOS_READ_PASSWORD: ${DADOS_READ_PASSWORD:-}
+      # Tuning PG_* — os defaults da imagem JÁ SÃO o cenário atual
+      # (compartilhado, ~4 GB p/ o Postgres). Sobrescreva via .env somente
+      # em máquina diferente; a carga mensal se beneficia de mais
+      # maintenance_work_mem/WAL se a máquina tiver folga:
+      PG_SHARED_BUFFERS: ${PG_SHARED_BUFFERS:-2GB}
+      PG_EFFECTIVE_CACHE_SIZE: ${PG_EFFECTIVE_CACHE_SIZE:-4GB}
+      PG_WORK_MEM: ${PG_WORK_MEM:-32MB}
+      PG_MAINTENANCE_WORK_MEM: ${PG_MAINTENANCE_WORK_MEM:-512MB}
+      PG_MAX_WAL_SIZE: ${PG_MAX_WAL_SIZE:-4GB}
+      PG_RANDOM_PAGE_COST: ${PG_RANDOM_PAGE_COST:-1.5}
     ports:
       - '${FORWARD_DB_PORT:-5432}:5432'
     networks:
       - rfb-cnpj-network
+    shm_size: ${PG_SHM_SIZE:-1gb}
     deploy:
       resources:
         limits:
-          memory: 8G
+          memory: ${PG_MEMORY_LIMIT:-8G}
         reservations:
           memory: 2G
 
