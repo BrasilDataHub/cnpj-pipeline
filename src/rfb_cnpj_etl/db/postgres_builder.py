@@ -199,6 +199,15 @@ class PostgresBuilder:
 
         Idempotente: consulta relpersistence e só converte o que ainda é 'u'.
 
+        Ordem: dependência de FK, não tamanho — o PostgreSQL recusa converter
+        uma tabela para LOGGED enquanto ela referenciar (FK) uma tabela ainda
+        UNLOGGED. No pipeline as FKs ainda não existem nesta etapa e qualquer
+        ordem serve; no uso avulso (`db logged` contra uma base já com FKs,
+        como a produção) a ordem errada aborta com "could not change table
+        ... because it references unlogged table". Dentro de cada nível de
+        dependência, converte da menor para a maior (falha cedo se faltar
+        espaço/WAL).
+
         Pode ser executado independentemente via: python etl.py db logged
         """
         try:
@@ -209,33 +218,66 @@ class PostgresBuilder:
             cur = self.conn.cursor()
 
             cur.execute("""
-                SELECT relname
+                SELECT relname, pg_total_relation_size(c.oid)
                 FROM pg_class c
                 JOIN pg_namespace n ON n.oid = c.relnamespace
                 WHERE n.nspname = 'public'
                   AND c.relkind = 'r'
-                  AND c.relpersistence = 'u'
-                ORDER BY pg_total_relation_size(c.oid);
+                  AND c.relpersistence = 'u';
             """)
-            unlogged = [row[0] for row in cur.fetchall()]
+            sizes = {row[0]: row[1] for row in cur.fetchall()}
+            remaining = set(sizes)
 
-            if not unlogged:
+            if not remaining:
                 print_log("NENHUMA TABELA UNLOGGED ENCONTRADA", level="docs")
                 return
 
-            total = len(unlogged)
+            # Arestas de FK entre tabelas ainda UNLOGGED: quem referencia só
+            # pode ser convertida depois da referenciada.
+            cur.execute("""
+                SELECT rel.relname, ref.relname
+                FROM pg_constraint con
+                JOIN pg_class rel ON rel.oid = con.conrelid
+                JOIN pg_class ref ON ref.oid = con.confrelid
+                JOIN pg_namespace n ON n.oid = rel.relnamespace
+                WHERE con.contype = 'f' AND n.nspname = 'public';
+            """)
+            depends_on: dict[str, set] = {}
+            for table_name, referenced in cur.fetchall():
+                if table_name in remaining and referenced in remaining and table_name != referenced:
+                    depends_on.setdefault(table_name, set()).add(referenced)
+
+            total = len(remaining)
             width = len(str(total))
-            for i, table_name in enumerate(unlogged, start=1):
-                start_time = time.time()
-                cur.execute(f'ALTER TABLE public."{table_name}" SET LOGGED;')
-                elapsed = time.time() - start_time
-                print_log(
-                    f"[{i:0{width}}/{total}] LOGGED: {table_name} ({elapsed:.1f}s)",
-                    level="docs"
-                )
+            converted: set = set()
+            i = 0
+
+            while remaining:
+                ready = [
+                    t for t in remaining
+                    if not (depends_on.get(t, set()) - converted)
+                ]
+
+                if not ready:
+                    raise RuntimeError(
+                        "Ciclo de FKs entre tabelas UNLOGGED impede a conversão: "
+                        + ", ".join(sorted(remaining))
+                    )
+
+                for table_name in sorted(ready, key=lambda t: sizes[t]):
+                    i += 1
+                    start_time = time.time()
+                    cur.execute(f'ALTER TABLE public."{table_name}" SET LOGGED;')
+                    elapsed = time.time() - start_time
+                    print_log(
+                        f"[{i:0{width}}/{total}] LOGGED: {table_name} ({elapsed:.1f}s)",
+                        level="docs"
+                    )
+                    converted.add(table_name)
+                    remaining.discard(table_name)
 
             print_log("TABELAS CONVERTIDAS PARA LOGGED", level="success")
-        except psycopg2.Error as e:
+        except (psycopg2.Error, RuntimeError) as e:
             print_log(f"ERRO AO CONVERTER TABELAS PARA LOGGED: {e}", level="error")
             raise
 
