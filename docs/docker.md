@@ -3,6 +3,25 @@
 O projeto inclui suporte completo a Docker, permitindo executar o ETL de forma portátil em qualquer ambiente
 (local, servidor, cloud). Os arquivos baixados são persistidos no host através de volumes mapeados.
 
+## Imagem do PostgreSQL
+
+O compose usa a imagem da nossa infra, **`ghcr.io/brasildatahub/postgres:17`**
+(repositório `infra/`, publicada pela CI no GHCR com pull anônimo) — não a
+`postgres:17` crua. Ela embute:
+
+- `postgresql.conf` gerado no start a partir das envs `PG_*` — os **defaults
+  já são o cenário atual** (host compartilhado, ~4 GB para o Postgres), então
+  sem env nenhuma o comportamento é o tuning padrão da org, nunca o default
+  de fábrica do Postgres (`shared_buffers=128MB` etc.);
+- initdb (primeira inicialização, volume vazio) com as extensões `pg_trgm`,
+  `unaccent`, `pg_stat_statements` e `btree_gin` e o role de leitura
+  `dados_read` com timeouts de servidor;
+- `pg_stat_statements` pré-carregado (`shared_preload_libraries`).
+
+Para retunar em outra máquina, sobrescreva as envs `PG_*` no `.env` — a
+tabela completa e os blocos por cenário (compartilhada 8 GB, dedicada 64 GB,
+dedicada 128 GB) estão em `infra/postgres/README.md`.
+
 ## Configuração
 
 ```bash
