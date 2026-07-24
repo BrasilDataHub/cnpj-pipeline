@@ -46,6 +46,7 @@ _SELECT_SOURCE = """
         est.data_inicio_atividade,
         est.cep,
         est.ddd_telefone_1,
+        est.ddd_telefone_2,
         unaccent(upper(est.bairro))         AS bairro_norm
     FROM public.estabelecimento est
     LEFT JOIN public.empresa emp ON emp.cnpj_basico = est.cnpj_basico

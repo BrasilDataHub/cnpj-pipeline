@@ -134,7 +134,8 @@ cada carga mensal por build-and-swap (`*_new` + `RENAME` em transação única).
   - `cod_natureza_juridica` VARCHAR(4)
   - `data_inicio_atividade` DATE
   - `cep` VARCHAR(8)
-  - `ddd_telefone_1` VARCHAR(4)
+  - `ddd_telefone_1` / `ddd_telefone_2` VARCHAR(4) — os dois DDDs: o filtro
+    de DDD do website sempre casou contra ambos os telefones
   - `bairro_norm` TEXT — `unaccent(upper(estabelecimento.bairro))`
 - **Índices:**
   - `idx_busca_razao_social_trgm` GIN (`razao_social_norm` gin_trgm_ops)
