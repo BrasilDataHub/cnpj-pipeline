@@ -1,4 +1,4 @@
-# rfb-cnpj-etl
+# cnpj-pipeline
 
 ETL completo dos dados públicos de CNPJ para PostgreSQL.
 
@@ -26,8 +26,8 @@ O total de linhas (somando todas as tabelas) já está na casa dos **200 milhõe
 ### Docker (Recomendado)
 
 ```bash
-git clone https://github.com/brasildatahub/rfb-cnpj-etl.git
-cd rfb-cnpj-etl
+git clone https://github.com/brasildatahub/cnpj-pipeline.git
+cd cnpj-pipeline
 cp .env.example .env
 # Edite .env com suas configurações
 
@@ -40,8 +40,8 @@ docker compose run --rm etl complete --month 01/2026 --parallel
 ### Instalação Local
 
 ```bash
-git clone https://github.com/brasildatahub/rfb-cnpj-etl.git
-cd rfb-cnpj-etl
+git clone https://github.com/brasildatahub/cnpj-pipeline.git
+cd cnpj-pipeline
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -136,7 +136,7 @@ alto (≥4 GB) reduz checkpoints durante a conversão. A etapa é idempotente
 ## Estrutura do Projeto
 
 ```
-rfb-cnpj-etl/
+cnpj-pipeline/
 ├── src/rfb_cnpj_etl/      # Código-fonte do ETL
 │   ├── main.py            # CLI principal
 │   ├── orchestrator.py    # Orquestrador de etapas
@@ -156,8 +156,8 @@ rfb-cnpj-etl/
 
 ## Contribuição
 
-Contribuições são bem-vindas. Para reportar bugs ou sugerir ideias, abra uma [Issue](https://github.com/brasildatahub/rfb-cnpj-etl/issues).
-Para enviar melhorias, crie um [Pull Request](https://github.com/brasildatahub/rfb-cnpj-etl/pulls).
+Contribuições são bem-vindas. Para reportar bugs ou sugerir ideias, abra uma [Issue](https://github.com/brasildatahub/cnpj-pipeline/issues).
+Para enviar melhorias, crie um [Pull Request](https://github.com/brasildatahub/cnpj-pipeline/pulls).
 
 ## Licença
 

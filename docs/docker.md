@@ -104,8 +104,8 @@ O Docker facilita a execução em servidores com mais recursos (CPU, RAM, SSD):
 
 ```bash
 # Clone no servidor remoto
-git clone https://github.com/brasildatahub/rfb-cnpj-etl.git
-cd rfb-cnpj-etl
+git clone https://github.com/brasildatahub/cnpj-pipeline.git
+cd cnpj-pipeline
 
 # Configure e execute
 cp .env.example .env

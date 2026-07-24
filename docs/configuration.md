@@ -124,6 +124,6 @@ psql -h localhost -U seu_usuario -d cnpj_rfb -f sql/general_improvements.sql
 ### Detalhes
 
 **`general_improvements.sql`** - Configurações e manutenção:
-- Extensões: `pg_trgm`, `pg_prewarm`, `pg_stat_statements`
+- Extensões: `pg_trgm`, `pg_prewarm`, `pg_stat_statements`, `unaccent`
 - Funções: `prewarm_critical_indexes()`, `vacuum_analyze_all()`, `table_statistics()`
 - Validações: `validate_cnpj_completo()`, `check_referential_integrity()`

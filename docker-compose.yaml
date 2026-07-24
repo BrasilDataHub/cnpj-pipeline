@@ -50,7 +50,7 @@ services:
     build:
       context: .
       dockerfile: docker/etl/Dockerfile
-    container_name: rfb-cnpj-etl
+    container_name: cnpj-pipeline
     depends_on:
       postgres:
         condition: service_healthy
@@ -87,7 +87,7 @@ services:
 
   etl-init-permissions:
     image: alpine:3.19
-    container_name: rfb-cnpj-etl-init-permissions
+    container_name: cnpj-pipeline-init-permissions
     user: "0:0"
     volumes:
       - ./data/downloads:/app/data/downloads

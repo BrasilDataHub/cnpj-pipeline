@@ -33,7 +33,10 @@ CREATE EXTENSION IF NOT EXISTS pg_prewarm;
 -- Extensão para estatísticas detalhadas de tabelas
 CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 
-\echo '    -> Extensões instaladas: pg_trgm, pg_prewarm, pg_stat_statements'
+-- Extensão para normalização de acentos (busca_estabelecimento, AG13)
+CREATE EXTENSION IF NOT EXISTS unaccent;
+
+\echo '    -> Extensões instaladas: pg_trgm, pg_prewarm, pg_stat_statements, unaccent'
 
 -- =============================================================================
 -- SEÇÃO 2: CONFIGURAÇÕES DE SESSÃO PARA CARGA MASSIVA
@@ -333,6 +336,7 @@ Uso: SELECT * FROM check_referential_integrity();';
 \echo '  - pg_trgm: Busca textual com trigramas'
 \echo '  - pg_prewarm: Pré-aquecimento de índices'
 \echo '  - pg_stat_statements: Estatísticas de queries'
+\echo '  - unaccent: Normalização de acentos'
 \echo ''
 \echo 'Funções utilitárias disponíveis:'
 \echo '  - prewarm_critical_indexes(): Pré-aquece índices no cache'
