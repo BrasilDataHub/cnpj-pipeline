@@ -7,7 +7,7 @@ Orquestração da carga de dados
 import os
 from typing import Optional
 from .cnpj_data import CNPJDataScraper
-from .db import PostgresBuilder, run_postgres_loader, carregar_tabelas_ibge
+from .db import PostgresBuilder, run_postgres_loader, carregar_tabelas_ibge, build_search_table
 from .utils.logger import print_log
 from .utils.zip_metadata import validate_zip_files, estimate_total_lines_from_size
 from .config import (
@@ -41,6 +41,7 @@ def run_orchestrator(
         - pk: Adiciona chaves primárias
         - index: Cria todos os índices (básicos + avançados)
         - fk: Cria chaves estrangeiras
+        - search: Constrói/reconstrói a tabela de busca (build-and-swap)
         - views-create: Cria/recria Materialized Views
         - views-refresh: Atualiza Materialized Views
 
@@ -157,6 +158,16 @@ def run_orchestrator(
         builder.enable_foreign_keys()
     elif command == "load" and not only_data:
         builder.enable_foreign_keys()
+
+    # =========================================================================
+    # ETAPA 6.5: Tabela de busca enxuta (search ou load sem --only-data)
+    # Pós-carga: depende dos dados finais de estabelecimento/empresa e da
+    # extensão unaccent. Build-and-swap — leitura nunca fica indisponível.
+    # =========================================================================
+    if command == "search":
+        build_search_table(postgres_config)
+    elif command == "load" and not only_data:
+        build_search_table(postgres_config)
 
     # =========================================================================
     # ETAPA 7: Materialized Views (comandos opcionais)
