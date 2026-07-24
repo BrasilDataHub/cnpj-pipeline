@@ -112,6 +112,13 @@ def main() -> None:
     p_fk = db_sub.add_parser("fk", help="Cria chaves estrangeiras no banco")
     p_fk.add_argument("--db-name", type=str, default=POSTGRES["database"])
 
+    # db-search
+    p_search = db_sub.add_parser(
+        "search",
+        help="Constrói/reconstrói a tabela de busca busca_estabelecimento (build-and-swap)"
+    )
+    p_search.add_argument("--db-name", type=str, default=POSTGRES["database"])
+
     # db-views (subcomando com create e refresh)
     views_cmd = db_sub.add_parser("views", help="Comandos para Materialized Views")
     views_sub = views_cmd.add_subparsers(dest="views_command", required=True)

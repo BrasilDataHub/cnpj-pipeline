@@ -113,6 +113,37 @@ A fonte da verdade é o schema programático (`src/rfb_cnpj_etl/db/schema.py`), 
   - `cnpj_completo` -> `estabelecimento.cnpj_completo`
   - `cod_cnae` -> `cnae.cod_cnae`
 
+### Tabela de Busca (derivada, recriada a cada carga)
+
+#### `busca_estabelecimento`
+Tabela desnormalizada enxuta para a busca do website (fonte:
+`src/rfb_cnpj_etl/db/search_table.py`, comando `db search`). Uma linha por
+estabelecimento; nomes normalizados com `unaccent(upper(...))`. Recriada a
+cada carga mensal por build-and-swap (`*_new` + `RENAME` em transação única).
+- **PK:** `cnpj_completo`
+- **Colunas:**
+  - `cnpj_completo` CHAR(14)
+  - `cnpj_basico` VARCHAR(8)
+  - `razao_social_norm` TEXT — `unaccent(upper(empresa.razao_social))`
+  - `nome_fantasia_norm` TEXT — `unaccent(upper(estabelecimento.nome_fantasia))`
+  - `cod_regiao_ibge` / `cod_estado_ibge` / `cod_cidade_ibge` INTEGER
+  - `cod_cnae_principal` VARCHAR(7)
+  - `cod_situacao_cadastral` VARCHAR(2)
+  - `matriz_filial` VARCHAR(1)
+  - `cod_porte` VARCHAR(2)
+  - `cod_natureza_juridica` VARCHAR(4)
+  - `data_inicio_atividade` DATE
+  - `cep` VARCHAR(8)
+  - `ddd_telefone_1` VARCHAR(4)
+  - `bairro_norm` TEXT — `unaccent(upper(estabelecimento.bairro))`
+- **Índices:**
+  - `idx_busca_razao_social_trgm` GIN (`razao_social_norm` gin_trgm_ops)
+  - `idx_busca_nome_fantasia_trgm` GIN (`nome_fantasia_norm` gin_trgm_ops)
+  - `idx_busca_cidade_situacao_cnpj` (`cod_cidade_ibge`, `cod_situacao_cadastral`, `cnpj_completo`)
+  - `idx_busca_cnae_estado_situacao` (`cod_cnae_principal`, `cod_estado_ibge`, `cod_situacao_cadastral`)
+- **Sem FKs** (por design: a troca atômica por RENAME não pode depender de
+  constraints cruzadas; a consistência vem da recriação conjunta na carga).
+
 ### Tabelas de Domínio (Lookup)
 
 #### `cnae`

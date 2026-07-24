@@ -73,6 +73,9 @@ python etl.py db views refresh --concurrent
 # Converter tabelas UNLOGGED para LOGGED manualmente (já roda no pipeline)
 python etl.py db logged
 
+# Reconstruir a tabela de busca enxuta manualmente (já roda no pipeline)
+python etl.py db search
+
 # Listar meses disponíveis
 python etl.py get-availables
 

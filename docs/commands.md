@@ -22,6 +22,7 @@ docker compose run --rm etl <comando> [opções]
 | `db pk` | Adiciona chaves primárias |
 | `db index` | Cria todos os índices (básicos + avançados) |
 | `db fk` | Cria chaves estrangeiras |
+| `db search` | Constrói/reconstrói a tabela de busca `busca_estabelecimento` (build-and-swap) |
 | `db views create` | Cria/recria Materialized Views |
 | `db views refresh` | Atualiza dados das Materialized Views |
 | `complete` | Executa todo o pipeline (download + carga + views) |
@@ -154,6 +155,39 @@ O comando `db index` cria automaticamente:
 
 ---
 
+## Comando `db search`
+
+Constrói (ou reconstrói) a **tabela de busca enxuta** `busca_estabelecimento`:
+uma linha por estabelecimento, apenas os campos filtráveis da busca do website
+e nomes normalizados com `unaccent(upper(...))` (razão social, nome fantasia
+e bairro). É a etapa 6.5 do pipeline de carga — roda automaticamente no
+`db load`/`complete` — e pode ser executada isoladamente após qualquer carga.
+
+| Flag | Tipo | Padrão | Descrição |
+|------|------|--------|-----------|
+| `--db-name` | `string` | `dados_cnpj` | Nome do banco |
+
+```bash
+python etl.py db search
+```
+
+**Build-and-swap (zero downtime de leitura):**
+1. `CREATE UNLOGGED TABLE busca_estabelecimento_new AS SELECT ...` (CTAS rápido, sem WAL);
+2. validação de contagem (1 linha por linha de `estabelecimento` — o build aborta se divergir, mantendo a tabela vigente);
+3. `ALTER TABLE ... SET LOGGED` (durabilidade antes de indexar);
+4. PK em `cnpj_completo` + índices com sufixo `_new` (2 GIN trigram nas colunas de nome normalizadas + 2 btrees compostos) + `ANALYZE`;
+5. **uma única transação**: `DROP` da tabela vigente + `RENAME` da nova + renomeação de PK/índices — leitores nunca veem estado intermediário.
+
+O comando é idempotente: restos de builds interrompidos (`*_new`) são
+descartados no início, e a troca funciona tanto na primeira execução
+(sem tabela vigente) quanto nas recriações mensais.
+
+**Requisitos:** extensão `unaccent` (criada no `db init`) e tabelas
+`estabelecimento`/`empresa` carregadas. Tamanho estimado em produção:
+10–12 GB para 72M de linhas.
+
+---
+
 ## Comandos `db views create` e `db views refresh`
 
 Comandos **opcionais** para criação e atualização de Materialized Views (MVs).
@@ -241,10 +275,12 @@ O ETL pode ser executado **etapa por etapa**, útil para:
 | 2 | `python etl.py download` | Baixa arquivos da RFB |
 | 3 | `python etl.py db load --only-data` | Carrega dados (sem extras) |
 | 4 | `python etl.py db patch` | Aplica correções estáticas |
-| 5 | `python etl.py db pk` | Adiciona chaves primárias |
-| 6 | `python etl.py db index` | Cria todos os índices (básicos + avançados) |
-| 7 | `python etl.py db fk` | Cria chaves estrangeiras |
-| 8 | `python etl.py db views create` | *(Opcional)* Cria Materialized Views |
+| 5 | `python etl.py db logged` | Converte tabelas UNLOGGED para LOGGED |
+| 6 | `python etl.py db pk` | Adiciona chaves primárias |
+| 7 | `python etl.py db index` | Cria todos os índices (básicos + avançados) |
+| 8 | `python etl.py db fk` | Cria chaves estrangeiras |
+| 9 | `python etl.py db search` | Constrói a tabela de busca `busca_estabelecimento` |
+| 10 | `python etl.py db views create` | *(Opcional)* Cria Materialized Views |
 
 **Retomar após falha:**
 
@@ -262,9 +298,11 @@ python etl.py db init
 python etl.py download --month 01/2026
 python etl.py db load --only-data --month 01/2026
 python etl.py db patch
+python etl.py db logged
 python etl.py db pk
 python etl.py db index
 python etl.py db fk
+python etl.py db search
 ```
 
 ---
