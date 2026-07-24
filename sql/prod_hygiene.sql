@@ -27,9 +27,9 @@
 --
 -- DURAÇÃO ESTIMADA POR PASSO (hardware atual — CCX13, volume de rede):
 --   Passo 1 (extensões):        segundos.
---   Passo 2 (SET LOGGED):       1–3 h no total, tabela a tabela, na ordem
---                               da menor para a maior (simples → socio →
---                               cnae_sec → empresa → estabelecimento).
+--   Passo 2 (SET LOGGED):       1–3 h no total, tabela a tabela, na ordem de
+--                               DEPENDÊNCIA de FK (catálogos → empresa →
+--                               simples/socio/estabelecimento → cnae_sec).
 --   Passo 3 (DROP INDEX):       minutos (CONCURRENTLY, sem lock de escrita).
 --   Passo 4 (timeouts do role): segundos.
 --
@@ -53,26 +53,36 @@ CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 -- Tabela UNLOGGED é TRUNCADA pelo PostgreSQL no recovery após crash — hoje
 -- um crash perde a base inteira. LOGGED também é pré-condição para backup
 -- físico/PITR e réplicas. O comando é no-op em tabela já LOGGED (idempotente).
--- Ordem: da menor para a maior, para liberar risco cedo e falhar cedo se
--- faltar espaço/WAL.
+--
+-- ORDEM OBRIGATÓRIA — dependência de FK, não tamanho: o PostgreSQL recusa
+-- converter uma tabela para LOGGED enquanto ela referenciar (FK) uma tabela
+-- ainda UNLOGGED ("could not change table X to logged because it references
+-- unlogged table Y"). Portanto: catálogos primeiro, depois empresa, depois
+-- quem referencia empresa, e estabelecimento_cnae_sec por último.
 -- =============================================================================
 
-ALTER TABLE public.simples SET LOGGED;
-ALTER TABLE public.socio SET LOGGED;
-ALTER TABLE public.estabelecimento_cnae_sec SET LOGGED;
-ALTER TABLE public.empresa SET LOGGED;
-ALTER TABLE public.estabelecimento SET LOGGED;
-
--- Tabelas pequenas (catálogos) — segundos no total, mesmo risco de truncamento.
+-- 2a. Catálogos (segundos; ninguém referencia UNLOGGED depois deles).
+--     ibge_regiao → ibge_estado → ibge_cidade também é ordem de FK.
 ALTER TABLE public.cnae SET LOGGED;
 ALTER TABLE public.motivo SET LOGGED;
 ALTER TABLE public.municipio_rfb SET LOGGED;
-ALTER TABLE public.ibge_regiao SET LOGGED;
-ALTER TABLE public.ibge_estado SET LOGGED;
-ALTER TABLE public.ibge_cidade SET LOGGED;
 ALTER TABLE public.natureza_juridica SET LOGGED;
 ALTER TABLE public.pais SET LOGGED;
 ALTER TABLE public.qualificacao_socio SET LOGGED;
+ALTER TABLE public.ibge_regiao SET LOGGED;
+ALTER TABLE public.ibge_estado SET LOGGED;
+ALTER TABLE public.ibge_cidade SET LOGGED;
+
+-- 2b. empresa (referencia natureza_juridica e qualificacao_socio — já LOGGED).
+ALTER TABLE public.empresa SET LOGGED;
+
+-- 2c. Quem referencia empresa/catálogos.
+ALTER TABLE public.simples SET LOGGED;
+ALTER TABLE public.socio SET LOGGED;
+ALTER TABLE public.estabelecimento SET LOGGED;
+
+-- 2d. Quem referencia estabelecimento.
+ALTER TABLE public.estabelecimento_cnae_sec SET LOGGED;
 
 -- Verificação: deve retornar 0 linhas.
 SELECT c.relname AS ainda_unlogged
