@@ -12,7 +12,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: cnpj-etl
+  IMAGE_NAME: cnpj-pipeline
 
 jobs:
 
@@ -66,7 +66,7 @@ jobs:
           VERSION: ${{ steps.version.outputs.VERSION }}
         run: |
           # Usar repository_owner para obter apenas o owner (organização ou usuário)
-          # Resultado: ghcr.io/brasildatahub/cnpj-etl
+          # Resultado: ghcr.io/brasildatahub/cnpj-pipeline
           IMAGE_ID=${{ env.REGISTRY }}/${{ github.repository_owner }}/$IMAGE_NAME
 
           # Use Docker `latest` tag convention

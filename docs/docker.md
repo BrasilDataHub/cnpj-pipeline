@@ -130,7 +130,7 @@ docker run --rm \
   -v ./data/downloads:/app/data/downloads \
   -v ./data/logs:/app/data/logs \
   -v ./data/locations:/app/data/locations:ro \
-  ghcr.io/brasildatahub/cnpj-etl:latest \
+  ghcr.io/brasildatahub/cnpj-pipeline:latest \
   complete --month 01/2026 --parallel
 ```
 
@@ -166,14 +166,14 @@ docker run --rm \
   -e POSTGRES_DBNAME=dados_cnpj \
   -v ./data/downloads:/app/data/downloads \
   -v ./data/logs:/app/data/logs \
-  ghcr.io/brasildatahub/cnpj-etl:latest \
+  ghcr.io/brasildatahub/cnpj-pipeline:latest \
   complete --month 01/2026 --parallel
 
 # Apenas download
 docker run --rm \
   -v ./data/downloads:/app/data/downloads \
   -v ./data/logs:/app/data/logs \
-  ghcr.io/brasildatahub/cnpj-etl:latest \
+  ghcr.io/brasildatahub/cnpj-pipeline:latest \
   download --month 01/2026 --workers 10
 
 # Apenas carga (arquivos já baixados)
@@ -185,7 +185,7 @@ docker run --rm \
   -e POSTGRES_DBNAME=dados_cnpj \
   -v ./data/downloads:/app/data/downloads \
   -v ./data/logs:/app/data/logs \
-  ghcr.io/brasildatahub/cnpj-etl:latest \
+  ghcr.io/brasildatahub/cnpj-pipeline:latest \
   db load --month 01/2026 --parallel
 
 # Criar Materialized Views (opcional, após carga)
@@ -195,7 +195,7 @@ docker run --rm \
   -e POSTGRES_USER=seu-usuario \
   -e POSTGRES_PASSWORD=sua-senha \
   -e POSTGRES_DBNAME=dados_cnpj \
-  ghcr.io/brasildatahub/cnpj-etl:latest \
+  ghcr.io/brasildatahub/cnpj-pipeline:latest \
   db views create
 
 # Atualizar Materialized Views
@@ -205,12 +205,12 @@ docker run --rm \
   -e POSTGRES_USER=seu-usuario \
   -e POSTGRES_PASSWORD=sua-senha \
   -e POSTGRES_DBNAME=dados_cnpj \
-  ghcr.io/brasildatahub/cnpj-etl:latest \
+  ghcr.io/brasildatahub/cnpj-pipeline:latest \
   db views refresh --concurrent
 
 # Listar meses disponíveis
-docker run --rm ghcr.io/brasildatahub/cnpj-etl:latest get-availables
+docker run --rm ghcr.io/brasildatahub/cnpj-pipeline:latest get-availables
 
 # Ver ajuda
-docker run --rm ghcr.io/brasildatahub/cnpj-etl:latest --help
+docker run --rm ghcr.io/brasildatahub/cnpj-pipeline:latest --help
 ```
