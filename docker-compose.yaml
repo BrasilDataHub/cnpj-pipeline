@@ -47,9 +47,12 @@ services:
           memory: 2G
 
   etl:
+    # Imagem pública no GHCR (pull anônimo). `docker compose pull` traz a
+    # imagem pronta; `docker compose build` continua reconstruindo local.
+    image: ghcr.io/brasildatahub/cnpj-pipeline:${IMAGE_TAG:-latest}
     build:
       context: .
-      dockerfile: docker/etl/Dockerfile
+      dockerfile: docker/Dockerfile
     container_name: cnpj-pipeline
     depends_on:
       postgres:
