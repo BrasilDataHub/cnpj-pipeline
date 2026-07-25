@@ -37,6 +37,22 @@ Edite conforme a sua necessidade.
 ## Logs e Auditoria
 
 Por padrão, o CLI grava logs em `data/logs/etl-YYYY-MM-DD.log` (rotação diária simples).
+A gravação é **sempre ativa** — não existe flag para desligá-la — e o arquivo é
+aberto em modo append com flush por linha, então o conteúdo pode ser
+acompanhado em tempo real enquanto o pipeline roda:
+
+```bash
+tail -f data/logs/etl-$(date +%F).log
+```
+
+É por esse arquivo que se acompanha uma execução em segundo plano (veja
+[Guia Docker](docker.md#execução-em-segundo-plano-detached)). Via Docker, ele fica
+no host graças ao volume `./data/logs:/app/data/logs` e sobrevive à remoção do
+container.
+
+O arquivo recebe apenas as **mensagens de etapa** (com horário e tempo
+decorrido). As barras de progresso do `tqdm` vão só para o terminal — elas se
+redesenham com `\r` e não fariam sentido em arquivo.
 
 ### Configuração via variável de ambiente
 

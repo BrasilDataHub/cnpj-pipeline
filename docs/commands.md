@@ -6,8 +6,12 @@
 # Execução local
 python etl.py <comando> [opções]
 
-# Execução via Docker
+# Execução via Docker (primeiro plano — prende o terminal)
 docker compose run --rm etl <comando> [opções]
+
+# Execução via Docker em segundo plano (comandos longos, como `complete`)
+docker compose run -d --name cnpj-run etl <comando> [opções]
+tail -f data/logs/etl-$(date +%F).log
 ```
 
 | Comando | Descrição |
@@ -58,7 +62,7 @@ python etl.py get-availables
 python etl.py get-latest
 
 # Exibe URLs de download para um mês
-python etl.py get-urls --month 01/2026
+python etl.py get-urls --month 07/2026
 ```
 
 ---
@@ -79,10 +83,10 @@ Baixa os arquivos ZIP de dados abertos do CNPJ diretamente do site da Receita Fe
 python etl.py download
 
 # Baixar mês específico
-python etl.py download --month 01/2026
+python etl.py download --month 07/2026
 
 # Baixar com limpeza prévia e 4 workers
-python etl.py download --month 01/2026 --clean --workers 4
+python etl.py download --month 07/2026 --clean --workers 4
 ```
 
 ---
@@ -118,13 +122,13 @@ Carrega os dados dos arquivos ZIP para o banco de dados.
 
 ```bash
 # Carga completa padrão (inclui todos os índices)
-python etl.py db load --month 01/2026
+python etl.py db load --month 07/2026
 
 # Carga apenas dados (sem extras)
-python etl.py db load --month 01/2026 --only-data
+python etl.py db load --month 07/2026 --only-data
 
 # Carga com paralelismo
-python etl.py db load --month 01/2026 --parallel
+python etl.py db load --month 07/2026 --parallel
 ```
 
 ---
@@ -254,11 +258,17 @@ Executa o pipeline completo: **download + carga + Materialized Views** em sequê
 
 ```bash
 # Pipeline completo (inclui índices e Materialized Views)
-python etl.py complete --month 01/2026 --parallel --clean
+python etl.py complete --month 07/2026 --parallel --clean
 
 # Apenas etapas do banco (arquivos já baixados)
-python etl.py complete --month 01/2026 --parallel --skip-download
+python etl.py complete --month 07/2026 --parallel --skip-download
 ```
+
+> Este comando leva **horas**. Em servidor, rode em segundo plano em vez de
+> deixá-lo preso ao terminal — via Docker com `docker compose run -d --name ...`
+> ([Guia Docker](docker.md#execução-em-segundo-plano-detached)) ou, em execução
+> local com Python, com `nohup python etl.py complete ... &`. Nos dois casos, o
+> acompanhamento é o mesmo: `tail -f data/logs/etl-$(date +%F).log`.
 
 ---
 
@@ -295,8 +305,8 @@ python etl.py db fk
 
 ```bash
 python etl.py db init
-python etl.py download --month 01/2026
-python etl.py db load --only-data --month 01/2026
+python etl.py download --month 07/2026
+python etl.py db load --only-data --month 07/2026
 python etl.py db patch
 python etl.py db logged
 python etl.py db pk

@@ -7,7 +7,7 @@
 # Publicada em ghcr.io/brasildatahub/cnpj-pipeline
 #
 # Uso:
-#   docker compose run --rm etl complete --month 01/2026 --parallel
+#   docker compose run --rm etl complete --month 07/2026 --parallel
 #   docker run --rm ghcr.io/brasildatahub/cnpj-pipeline:latest --help
 # =============================================================================
 

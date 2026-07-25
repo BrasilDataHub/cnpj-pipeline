@@ -47,13 +47,13 @@ docker compose up -d postgres
 ETL_UID=$(id -u) ETL_GID=$(id -g) docker compose up --abort-on-container-exit etl-init-permissions
 
 # Pipeline completo (download + carga + índices)
-docker compose run --rm etl complete --month 01/2026 --parallel
+docker compose run --rm etl complete --month 07/2026 --parallel
 
 # Apenas download
-docker compose run --rm etl download --month 01/2026 --workers 10
+docker compose run --rm etl download --month 07/2026 --workers 10
 
 # Apenas carga (arquivos já baixados)
-docker compose run --rm etl db load --month 01/2026 --parallel
+docker compose run --rm etl db load --month 07/2026 --parallel
 
 # Criar Materialized Views (opcional, após carga)
 docker compose run --rm etl db views create
@@ -68,6 +68,78 @@ docker compose run --rm etl get-availables
 docker compose run --rm etl --help
 ```
 
+## Execução em Segundo Plano (detached)
+
+Os comandos das seções acima rodam em **primeiro plano**: a saída fica presa ao
+terminal e, numa sessão SSH, fechar o terminal deixa a execução sem
+acompanhamento. Como o `complete` de um mês leva **horas**, em servidor a forma
+correta é rodar em segundo plano com `-d` e acompanhar pelos logs.
+
+### Com Docker Compose
+
+```bash
+# Dispara em segundo plano; imprime o ID do container e devolve o terminal
+docker compose run -d --name cnpj-run-2026-07 etl complete --month 07/2026 --parallel
+
+# Acompanhar (Ctrl+C encerra só o acompanhamento, não o pipeline)
+tail -f data/logs/etl-$(date +%F).log     # recomendado: só mensagens de etapa
+docker logs -f cnpj-run-2026-07           # stdout bruto do container
+
+# Situação atual e código de saída ao terminar
+docker ps --filter name=cnpj-run-2026-07
+docker inspect -f '{{.State.Status}} exit={{.State.ExitCode}}' cnpj-run-2026-07
+
+# Interromper antes do fim, se necessário
+docker stop cnpj-run-2026-07
+
+# Remover o container depois de conferir o resultado
+docker rm cnpj-run-2026-07
+```
+
+### Com `docker run`
+
+```bash
+docker run -d --name cnpj-run-2026-07 --env-file .env \
+  -v "$PWD/data/downloads:/app/data/downloads" \
+  -v "$PWD/data/logs:/app/data/logs" \
+  ghcr.io/brasildatahub/cnpj-pipeline:latest \
+  complete --month 07/2026 --parallel
+
+tail -f data/logs/etl-$(date +%F).log
+```
+
+### Como acompanhar
+
+| Fonte | Comando | Conteúdo |
+|---|---|---|
+| Arquivo de log (host) | `tail -f data/logs/etl-AAAA-MM-DD.log` | Mensagens de etapa, com horário e tempo decorrido |
+| Log do container | `docker logs -f <nome>` | Mesmas mensagens **mais** as barras de progresso |
+| Últimas linhas | `docker logs --tail 50 <nome>` | Fecha o acompanhamento sem seguir o fluxo |
+| Estado / saída | `docker inspect -f '{{.State.Status}} exit={{.State.ExitCode}}' <nome>` | `running`/`exited` e código de saída (`0` = sucesso) |
+
+O arquivo em `data/logs/` é gravado pelo próprio pipeline (sempre ativo, veja
+[Configuração](configuration.md#logs-e-auditoria)) e persiste no host mesmo
+depois de o container ser removido. As barras de progresso do `tqdm` **não**
+vão para esse arquivo — elas se redesenham com `\r` e só fazem sentido no
+terminal, o que também deixa a saída do `docker logs` visualmente poluída.
+
+### Cuidados
+
+- **Sempre use `--name`** ao rodar em segundo plano. Sem ele o container recebe
+  um nome gerado e você precisa descobrí-lo com `docker ps` para ver os logs.
+- **Não combine `-d` com `--rm`.** O container é apagado assim que o processo
+  termina, levando junto o `docker logs` e o código de saída — você perde a
+  única evidência de *como* a execução terminou. Remova manualmente com
+  `docker rm` depois de conferir o resultado.
+- **Não use políticas de restart** (`--restart always`, `unless-stopped`) neste
+  pipeline: ele é um job de execução única e seria reiniciado do zero a cada
+  término, refazendo a carga inteira.
+- **Um container por vez.** Duas execuções simultâneas do `complete` escrevem
+  nas mesmas tabelas e no mesmo diretório de downloads. Confira com
+  `docker ps` antes de disparar outra.
+- **Reboot do servidor encerra o job.** Não há retomada automática; reexecute o
+  comando (use `--skip-download` se os ZIPs já estiverem em `data/downloads`).
+
 ## Volumes Mapeados
 
 | Host | Container | Descrição |
@@ -78,6 +150,10 @@ docker compose run --rm etl --help
 | `./docker/volumes/postgresql` | `/var/lib/postgresql/data` | Dados do PostgreSQL (~40GB) |
 
 > Os downloads são persistidos no host, permitindo reutilização entre execuções.
+
+> **Nunca monte `/app/data` inteiro** (`-v ./data:/app/data`): os CSVs do IBGE
+> vêm dentro da imagem em `/app/data/locations` e seriam encobertos pela pasta
+> do host, fazendo a carga de localidades falhar. Monte apenas as subpastas.
 
 ## Permissões de Volumes (Importante)
 
@@ -113,8 +189,14 @@ cp .env.example .env
 
 docker compose up -d postgres
 ETL_UID=$(id -u) ETL_GID=$(id -g) docker compose up --abort-on-container-exit etl-init-permissions
-docker compose run --rm etl complete --month 01/2026 --parallel
+
+# Em segundo plano — não prende a sessão SSH (veja "Execução em Segundo Plano")
+docker compose run -d --name cnpj-run-2026-07 etl complete --month 07/2026 --parallel
+tail -f data/logs/etl-$(date +%F).log
 ```
+
+Numa sessão SSH, prefira sempre o modo detached: o `complete` leva horas e uma
+queda de conexão no modo interativo deixa você sem acompanhamento da execução.
 
 ## Execução Direta com Docker Run
 
@@ -131,7 +213,7 @@ docker run --rm \
   -v ./data/logs:/app/data/logs \
   -v ./data/locations:/app/data/locations:ro \
   ghcr.io/brasildatahub/cnpj-pipeline:latest \
-  complete --month 01/2026 --parallel
+  complete --month 07/2026 --parallel
 ```
 
 ### Variáveis de Ambiente
@@ -167,14 +249,14 @@ docker run --rm \
   -v ./data/downloads:/app/data/downloads \
   -v ./data/logs:/app/data/logs \
   ghcr.io/brasildatahub/cnpj-pipeline:latest \
-  complete --month 01/2026 --parallel
+  complete --month 07/2026 --parallel
 
 # Apenas download
 docker run --rm \
   -v ./data/downloads:/app/data/downloads \
   -v ./data/logs:/app/data/logs \
   ghcr.io/brasildatahub/cnpj-pipeline:latest \
-  download --month 01/2026 --workers 10
+  download --month 07/2026 --workers 10
 
 # Apenas carga (arquivos já baixados)
 docker run --rm \
@@ -186,7 +268,7 @@ docker run --rm \
   -v ./data/downloads:/app/data/downloads \
   -v ./data/logs:/app/data/logs \
   ghcr.io/brasildatahub/cnpj-pipeline:latest \
-  db load --month 01/2026 --parallel
+  db load --month 07/2026 --parallel
 
 # Criar Materialized Views (opcional, após carga)
 docker run --rm \

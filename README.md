@@ -79,14 +79,14 @@ Exemplos:
 
 ```bash
 # Pipeline completo (download + carga + índices + views)
-python etl.py complete --month 01/2026 --parallel --log-file data/logs/etl-{date}.log
+python etl.py complete --month 07/2026 --parallel --log-file data/logs/etl-{date}.log
 
 # Pipeline sem download (arquivos já baixados)
-python etl.py complete --month 01/2026 --parallel --skip-download
+python etl.py complete --month 07/2026 --parallel --skip-download
 
 # Etapas isoladas
-python etl.py download --month 01/2026
-python etl.py db load --month 01/2026 --parallel
+python etl.py download --month 07/2026
+python etl.py db load --month 07/2026 --parallel
 python etl.py db views refresh --concurrent
 ```
 
@@ -112,17 +112,18 @@ docker run --rm \
   -v "$PWD/data/downloads:/app/data/downloads" \
   -v "$PWD/data/logs:/app/data/logs" \
   ghcr.io/brasildatahub/cnpj-pipeline:latest \
-  complete --month 01/2026 --parallel
+  complete --month 07/2026 --parallel
 
 # Apenas download
 docker run --rm \
   -v "$PWD/data/downloads:/app/data/downloads" \
   ghcr.io/brasildatahub/cnpj-pipeline:latest \
-  download --month 01/2026 --workers 10
+  download --month 07/2026 --workers 10
 
 # Usando um arquivo .env
 docker run --rm --env-file .env \
-  -v "$PWD/data:/app/data" \
+  -v "$PWD/data/downloads:/app/data/downloads" \
+  -v "$PWD/data/logs:/app/data/logs" \
   ghcr.io/brasildatahub/cnpj-pipeline:latest \
   db views refresh --concurrent
 
@@ -134,12 +135,54 @@ docker run --rm ghcr.io/brasildatahub/cnpj-pipeline:latest --help
 **Tags disponíveis:** `latest`, `sha-<commit>`, e versões semânticas (`1.2.3`, `1.2`, `1`)
 quando há release. Para fixar uma versão em produção, prefira `sha-<commit>` ou a tag semver.
 
+**Monte as subpastas, nunca `/app/data` inteiro:** os CSVs do IBGE
+(`data/locations/`) vêm dentro da imagem. Um `-v "$PWD/data:/app/data"` cobre
+esse diretório com a pasta do host e a carga de localidades falha por falta dos
+arquivos. Monte apenas `data/downloads` e `data/logs`, como nos exemplos acima.
+
 **Permissões dos volumes:** a imagem roda como usuário não-root (`etluser`, uid 1000).
-Se os diretórios do host pertencerem ao `root`, o container não conseguirá escrever:
+Se os diretórios do host pertencerem ao `root`, o container não conseguirá escrever —
+o sintoma é `Permission denied` no arquivo de log e em todos os downloads:
 
 ```bash
-sudo chown -R 1000:1000 ./data/downloads ./data/logs
+mkdir -p data/downloads data/logs
+sudo chown -R 1000:1000 data/downloads data/logs
 ```
+
+### Execução em segundo plano
+
+Os exemplos acima rodam em primeiro plano e prendem o terminal até o fim — o que
+não serve para o `complete`, que leva **horas**. Em servidor (especialmente via
+SSH), use `-d` e acompanhe pelos logs:
+
+```bash
+# Dispara em segundo plano e devolve o terminal
+docker run -d --name cnpj-run-2026-07 --env-file .env \
+  -v "$PWD/data/downloads:/app/data/downloads" \
+  -v "$PWD/data/logs:/app/data/logs" \
+  ghcr.io/brasildatahub/cnpj-pipeline:latest \
+  complete --month 07/2026 --parallel
+
+# Acompanhar (Ctrl+C sai do acompanhamento, não interrompe o pipeline)
+tail -f data/logs/etl-$(date +%F).log     # recomendado: só mensagens de etapa
+docker logs -f cnpj-run-2026-07           # inclui as barras de progresso
+
+# Ao terminar: conferir o resultado e limpar
+docker inspect -f '{{.State.Status}} exit={{.State.ExitCode}}' cnpj-run-2026-07
+docker rm cnpj-run-2026-07
+
+# Interromper antes do fim, se necessário
+docker stop cnpj-run-2026-07
+```
+
+O pipeline já grava um log próprio em `data/logs/etl-AAAA-MM-DD.log` (sempre
+ativo, ajustável com `--log-file`/`LOG_FILE`). Como esse diretório é um volume
+do host, o log sobrevive à remoção do container — é a fonte mais confiável para
+acompanhar e auditar execuções longas.
+
+> Não combine `-d` com `--rm`: o container é apagado ao terminar e você perde o
+> `docker logs` e o código de saída. Remova com `docker rm` depois de conferir.
+> Mais detalhes e cuidados no [Guia Docker](docs/docker.md#execução-em-segundo-plano-detached).
 
 ## Execução com Docker Compose
 
@@ -157,14 +200,23 @@ docker compose up -d postgres
 # Ajusta permissões dos volumes (recomendado na primeira vez)
 ETL_UID=$(id -u) ETL_GID=$(id -g) docker compose up --abort-on-container-exit etl-init-permissions
 
-docker compose run --rm etl complete --month 01/2026 --parallel
+docker compose run --rm etl complete --month 07/2026 --parallel
+```
+
+Em segundo plano (recomendado em servidor — o `complete` leva horas):
+
+```bash
+docker compose run -d --name cnpj-run-2026-07 etl complete --month 07/2026 --parallel
+tail -f data/logs/etl-$(date +%F).log
+docker inspect -f '{{.State.Status}} exit={{.State.ExitCode}}' cnpj-run-2026-07
+docker rm cnpj-run-2026-07
 ```
 
 Outros exemplos:
 
 ```bash
-docker compose run --rm etl download --month 01/2026 --workers 10
-docker compose run --rm etl db load --month 01/2026 --parallel
+docker compose run --rm etl download --month 07/2026 --workers 10
+docker compose run --rm etl db load --month 07/2026 --parallel
 docker compose run --rm etl db views create
 docker compose run --rm etl db views refresh --concurrent
 docker compose run --rm etl --help
