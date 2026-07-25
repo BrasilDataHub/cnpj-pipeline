@@ -42,7 +42,7 @@ aberto em modo append com flush por linha, então o conteúdo pode ser
 acompanhado em tempo real enquanto o pipeline roda:
 
 ```bash
-tail -f data/logs/etl-$(date +%F).log
+tail -f data/logs/etl-$(date +%F).log      # via Docker o container roda em UTC: use `date -u +%F`
 ```
 
 É por esse arquivo que se acompanha uma execução em segundo plano (veja

@@ -3,6 +3,18 @@
 O projeto inclui suporte completo a Docker, permitindo executar o ETL de forma portátil em qualquer ambiente
 (local, servidor, cloud). Os arquivos baixados são persistidos no host através de volumes mapeados.
 
+- [Imagem do PostgreSQL](#imagem-do-postgresql)
+- [Configuração](#configuração)
+- [Comandos Docker](#comandos-docker)
+- [Execução em Segundo Plano (detached)](#execução-em-segundo-plano-detached)
+- [Logs](#logs)
+- [Ciclo de Vida do Container](#ciclo-de-vida-do-container)
+- [Volumes Mapeados](#volumes-mapeados)
+- [Permissões de Volumes](#permissões-de-volumes-importante)
+- [Execução em Servidores Remotos](#execução-em-servidores-remotos)
+- [Execução Direta com Docker Run](#execução-direta-com-docker-run)
+- [Diagnóstico](#diagnóstico)
+
 ## Imagem do PostgreSQL
 
 O compose usa a imagem da nossa infra, **`ghcr.io/brasildatahub/postgres:17`**
@@ -82,7 +94,7 @@ correta é rodar em segundo plano com `-d` e acompanhar pelos logs.
 docker compose run -d --name cnpj-run-2026-07 etl complete --month 07/2026 --parallel
 
 # Acompanhar (Ctrl+C encerra só o acompanhamento, não o pipeline)
-tail -f data/logs/etl-$(date +%F).log     # recomendado: só mensagens de etapa
+tail -f data/logs/etl-$(date -u +%F).log     # recomendado: só mensagens de etapa
 docker logs -f cnpj-run-2026-07           # stdout bruto do container
 
 # Situação atual e código de saída ao terminar
@@ -105,7 +117,7 @@ docker run -d --name cnpj-run-2026-07 --env-file .env \
   ghcr.io/brasildatahub/cnpj-pipeline:latest \
   complete --month 07/2026 --parallel
 
-tail -f data/logs/etl-$(date +%F).log
+tail -f data/logs/etl-$(date -u +%F).log
 ```
 
 ### Como acompanhar
@@ -139,6 +151,87 @@ terminal, o que também deixa a saída do `docker logs` visualmente poluída.
   `docker ps` antes de disparar outra.
 - **Reboot do servidor encerra o job.** Não há retomada automática; reexecute o
   comando (use `--skip-download` se os ZIPs já estiverem em `data/downloads`).
+
+## Logs
+
+O pipeline escreve em **dois lugares independentes**:
+
+### 1. Saída do container (sempre)
+
+Mensagens de etapa e barras de progresso do `tqdm`. `docker logs` captura tudo,
+mas essa saída **só existe enquanto o container existir**: `docker rm` (ou
+`--rm`) a apaga.
+
+### 2. Arquivo de log da aplicação (sempre ativo)
+
+Gravado em `data/logs/etl-AAAA-MM-DD.log`, em modo append e com flush por linha
+— pode ser acompanhado em tempo real. Como `data/logs` é volume do host, o
+arquivo **sobrevive à remoção do container**, e é a fonte mais confiável para
+auditar execuções longas:
+
+```bash
+tail -f data/logs/etl-$(date -u +%F).log            # acompanhar ao vivo
+grep -E '\[(ERROR|WARNING)' data/logs/etl-*.log     # triagem de problemas
+```
+
+O caminho é definido por `--log-file` (prioridade) ou pela env `LOG_FILE`, que
+aceita quatro formas:
+
+| Valor | Resultado |
+|---|---|
+| (vazio) | `data/logs/etl-AAAA-MM-DD.log` (default) |
+| `/var/log/etl/etl-{date}.log` | `{date}` substituído por `AAAA-MM-DD` |
+| `/var/log/etl/` (com barra final, ou diretório existente) | `/var/log/etl/etl-AAAA-MM-DD.log` |
+| `/var/log/etl/pipeline.log` | `/var/log/etl/pipeline-AAAA-MM-DD.log` (a data é inserida antes da extensão) |
+
+Caminhos relativos são resolvidos a partir de `/app` (o `WORKDIR` do container).
+Se apontar o log para fora de `/app/data/logs`, lembre-se de montar também esse
+outro diretório — caso contrário o arquivo morre com o container.
+
+**Fuso horário:** o container roda em **UTC**, tanto nos horários das mensagens
+quanto na data do nome do arquivo (por isso os exemplos usam `date -u +%F`).
+Para horário de Brasília, passe `-e TZ=America/Sao_Paulo` (a imagem já traz o
+tzdata) — aí o `tail` com a data local (`date +%F`) volta a bater.
+
+## Ciclo de Vida do Container
+
+| Ação | Comando | Observação |
+|---|---|---|
+| Listar em execução | `docker ps` | Só containers rodando |
+| Listar todos | `docker ps -a --filter name=cnpj-run` | Inclui os já terminados (`exited`) |
+| Interromper | `docker stop cnpj-run-2026-07` | `SIGTERM` + 10 s até o `SIGKILL`; a carga para onde estiver |
+| Interromper na hora | `docker kill cnpj-run-2026-07` | `SIGKILL` imediato — evite: pode deixar tabelas parcialmente carregadas |
+| Reiniciar | `docker restart cnpj-run-2026-07` | **Reexecuta o comando desde o início** — não há retomada. Para não rebaixar os ZIPs, prefira um comando novo com `--skip-download` |
+| Religar um parado | `docker start -a cnpj-run-2026-07` | Idem: recomeça o mesmo comando do zero |
+| Remover | `docker rm cnpj-run-2026-07` | Apaga o container e o `docker logs`; downloads e log em `data/` permanecem |
+| Remover à força | `docker rm -f cnpj-run-2026-07` | Para e remove numa tacada |
+| Ver o comando executado | `docker inspect -f '{{.Path}} {{.Args}}' cnpj-run-2026-07` | Confere o que rodou |
+| Ver o código de saída | `docker inspect -f 'exit={{.State.ExitCode}}' cnpj-run-2026-07` | `0` = sucesso; `1` = erro; `137` = morto por `stop`/OOM |
+| Consumo de recursos | `docker stats cnpj-run-2026-07` | CPU e memória em tempo real |
+| Abrir um shell na imagem | `docker run --rm -it --entrypoint bash ghcr.io/brasildatahub/cnpj-pipeline:latest` | Inspeção pontual (roda como `etluser`, uid 1000) |
+
+Para o PostgreSQL e demais serviços do compose:
+
+```bash
+docker compose ps                    # estado e healthcheck
+docker compose logs -f postgres      # log do banco
+docker compose stop postgres         # para, preservando os dados
+docker compose start postgres        # religa
+docker compose restart postgres      # reinicia (ex.: após mudar PG_*)
+docker compose down                  # para e REMOVE containers e rede
+```
+
+> `docker compose down` **não** apaga `./docker/volumes/postgresql` (bind mount
+> no host) — a base sobrevive. Para zerar o banco de verdade, pare o serviço e
+> apague esse diretório; a próxima subida refaz o initdb (extensões, role
+> `dados_read` e a collation `C`).
+
+Limpeza dos one-shot acumulados:
+
+```bash
+docker ps -a --filter name=cnpj-run --filter status=exited   # conferir antes
+docker container prune                                        # remove TODOS os parados
+```
 
 ## Volumes Mapeados
 
@@ -192,7 +285,7 @@ ETL_UID=$(id -u) ETL_GID=$(id -g) docker compose up --abort-on-container-exit et
 
 # Em segundo plano — não prende a sessão SSH (veja "Execução em Segundo Plano")
 docker compose run -d --name cnpj-run-2026-07 etl complete --month 07/2026 --parallel
-tail -f data/logs/etl-$(date +%F).log
+tail -f data/logs/etl-$(date -u +%F).log
 ```
 
 Numa sessão SSH, prefira sempre o modo detached: o `complete` leva horas e uma
@@ -218,13 +311,33 @@ docker run --rm \
 
 ### Variáveis de Ambiente
 
+Todas podem ser passadas com `-e`, `--env-file` ou pelo `environment:` do
+compose. O `.env` **não** entra na imagem (é excluído pelo `.dockerignore`).
+
+**Usadas pelo ETL:**
+
 | Variável | Descrição | Padrão |
 |----------|-----------|--------|
-| `POSTGRES_HOST` | Host do PostgreSQL | `localhost` |
+| `POSTGRES_HOST` | Host do PostgreSQL | `localhost` (compose: `postgres`) |
 | `POSTGRES_PORT` | Porta do PostgreSQL | `5432` |
 | `POSTGRES_USER` | Usuário do PostgreSQL | `postgres` |
 | `POSTGRES_PASSWORD` | Senha do PostgreSQL | - |
 | `POSTGRES_DBNAME` | Nome do banco de dados | `dados_cnpj` |
+| `DOWNLOAD_PATH` | Diretório dos ZIPs baixados (dentro do container) | `/app/data/downloads` |
+| `IBGE_CSV_DIR` | Diretório dos CSVs do IBGE (embutidos na imagem) | `/app/data/locations` |
+| `LOG_FILE` | Arquivo de log — ver [Logs](#logs) | `data/logs/etl-{date}.log` |
+| `RFB_WEBDAV_URL` | URL base WebDAV da Receita Federal (altere se o token mudar) | URL pública atual |
+| `TZ` | Fuso horário do container (afeta log e nome do arquivo) | `UTC` |
+
+**Usadas só pelo `docker-compose.yaml`:**
+
+| Variável | Descrição | Padrão |
+|----------|-----------|--------|
+| `IMAGE_TAG` | Tag da imagem do ETL | `latest` |
+| `FORWARD_DB_PORT` | Porta do host mapeada para o PostgreSQL | `5432` |
+| `ETL_UID` / `ETL_GID` | uid/gid aplicados pelo `etl-init-permissions` aos volumes | `1000`/`1000` |
+| `DADOS_READ_PASSWORD` | Senha do role de leitura criado no initdb (sem ela o role nasce `NOLOGIN`) | vazio |
+| `PG_SHARED_BUFFERS`, `PG_EFFECTIVE_CACHE_SIZE`, `PG_WORK_MEM`, `PG_MAINTENANCE_WORK_MEM`, `PG_MAX_WAL_SIZE`, `PG_RANDOM_PAGE_COST`, `PG_SHM_SIZE`, `PG_MEMORY_LIMIT` | Tuning da imagem do PostgreSQL — os defaults já são o cenário atual | ver `infra/postgres/README.md` |
 
 ### Volumes
 
@@ -295,4 +408,31 @@ docker run --rm ghcr.io/brasildatahub/cnpj-pipeline:latest get-availables
 
 # Ver ajuda
 docker run --rm ghcr.io/brasildatahub/cnpj-pipeline:latest --help
+```
+
+## Diagnóstico
+
+| Sintoma | Causa provável | O que fazer |
+|---|---|---|
+| `Permission denied` no log ou nos downloads | Diretórios do host pertencem ao `root` | `sudo chown -R 1000:1000 data/downloads data/logs` ou rode o `etl-init-permissions` |
+| Falha na carga de localidades (CSVs do IBGE ausentes) | Volume cobrindo `/app/data` inteiro | Monte só as subpastas (`data/downloads`, `data/logs`) |
+| `could not translate host name "postgres"` | `docker run` fora da rede do compose | Use `--network rfb-cnpj-network`, `--add-host postgres:host-gateway` ou aponte `POSTGRES_HOST` para o IP/DNS real |
+| `Connection refused` no banco | PostgreSQL ainda subindo ou porta não publicada | `docker compose ps` (healthcheck) e `docker compose logs postgres` |
+| Container morre com exit `137` | `docker stop` ou **OOM kill** | `docker inspect -f '{{.State.OOMKilled}}' <nome>`; o serviço `etl` tem limite de 4 GB no compose — ajuste `deploy.resources.limits` |
+| PostgreSQL reiniciando em loop | Tuning `PG_*` acima da RAM da máquina | `docker compose logs postgres`; reveja os cenários em `infra/postgres/README.md` |
+| `docker logs` vazio depois que terminou | Container criado com `--rm` | Use o arquivo em `data/logs/` (persiste) ou rode sem `--rm` |
+| Nada nos logs há muito tempo | Etapa longa sem emissão (criação de índices, `SET LOGGED`) | Confira atividade no banco: `docker compose exec postgres psql -U postgres -d dados_cnpj -c "select pid, state, query from pg_stat_activity where state <> 'idle'"` |
+| Horário do log 3 h à frente | Container em UTC | `-e TZ=America/Sao_Paulo` |
+| Download recomeça do zero | Volume de downloads não montado | Monte `./data/downloads:/app/data/downloads` e use `--skip-download` quando os ZIPs já existirem |
+
+### Comandos de triagem rápida
+
+```bash
+docker ps -a --filter name=cnpj-run                              # o que rodou e como terminou
+docker inspect -f '{{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}}' <nome>
+docker logs --tail 100 <nome>                                    # últimas linhas
+grep -E '\[(ERROR|WARNING)' data/logs/etl-*.log | tail -20       # erros no log da aplicação
+docker stats --no-stream                                         # memória/CPU agora
+docker compose logs --tail 100 postgres                          # lado do banco
+du -sh data/downloads docker/volumes/postgresql                   # espaço em disco
 ```

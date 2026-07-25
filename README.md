@@ -164,7 +164,7 @@ docker run -d --name cnpj-run-2026-07 --env-file .env \
   complete --month 07/2026 --parallel
 
 # Acompanhar (Ctrl+C sai do acompanhamento, não interrompe o pipeline)
-tail -f data/logs/etl-$(date +%F).log     # recomendado: só mensagens de etapa
+tail -f data/logs/etl-$(date -u +%F).log     # recomendado: só mensagens de etapa
 docker logs -f cnpj-run-2026-07           # inclui as barras de progresso
 
 # Ao terminar: conferir o resultado e limpar
@@ -207,7 +207,7 @@ Em segundo plano (recomendado em servidor — o `complete` leva horas):
 
 ```bash
 docker compose run -d --name cnpj-run-2026-07 etl complete --month 07/2026 --parallel
-tail -f data/logs/etl-$(date +%F).log
+tail -f data/logs/etl-$(date -u +%F).log
 docker inspect -f '{{.State.Status}} exit={{.State.ExitCode}}' cnpj-run-2026-07
 docker rm cnpj-run-2026-07
 ```
@@ -319,6 +319,13 @@ sobrescrito por `--log-file` (prioridade) ou pela variável `LOG_FILE`:
 python etl.py complete --log-file /var/log/etl/etl-{date}.log
 export LOG_FILE=data/logs/
 ```
+
+Via Docker, o arquivo fica no host graças ao volume `./data/logs:/app/data/logs`
+e sobrevive à remoção do container — é a fonte para acompanhar execuções em
+segundo plano. Os horários e a data do nome do arquivo seguem o fuso do
+container, que é **UTC**; para horário de Brasília, passe
+`-e TZ=America/Sao_Paulo`. Formas aceitas em `LOG_FILE` (`{date}`, diretório,
+arquivo) e comandos de acompanhamento: [Guia Docker](docs/docker.md#logs).
 
 ## Durabilidade (UNLOGGED → LOGGED)
 
