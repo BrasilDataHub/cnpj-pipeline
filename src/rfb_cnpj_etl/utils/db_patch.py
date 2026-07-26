@@ -96,6 +96,48 @@ def apply_static_fixes(conn):
         conn.commit()
 
         # =====================================================================
+        # FASE 2.5: rede de segurança para cod_pais órfão
+        # ---------------------------------------------------------------------
+        # A lista fixa da FASE 1 cobre os códigos extras já conhecidos, mas a
+        # RFB publica em `estabelecimento`/`socio` códigos legados que não
+        # constam do PAISCSV do mesmo mês — e o conjunto muda de mês para mês
+        # (em 07/2026: 042, 693 e 755, todos buracos na sequência da tabela de
+        # domínio). Cada código órfão aborta a criação de fk_estabelecimento_3
+        # ou fk_socio_2, deixando a base sem essas duas FKs em silêncio.
+        #
+        # Este bloco absorve qualquer código novo automaticamente, sem exigir
+        # que alguém edite a lista acima todo mês. Precisa rodar DEPOIS do LPAD
+        # da FASE 2 — antes dele, códigos de 2 dígitos entrariam sem padding.
+        # =====================================================================
+
+        print_log("  -> Absorvendo códigos de país órfãos...", level="docs")
+
+        paises_inseridos = 0
+        for tabela in ("estabelecimento", "socio"):
+            cur.execute(f"""
+                        INSERT INTO pais (cod_pais, nome_pais)
+                        SELECT DISTINCT o.cod_pais, 'CODIGO NAO CONSTANTE NA TABELA RFB'
+                          FROM {tabela} o
+                         WHERE o.cod_pais IS NOT NULL
+                           AND NOT EXISTS (
+                               SELECT 1 FROM pais p WHERE p.cod_pais = o.cod_pais
+                           )
+                        ON CONFLICT (cod_pais) DO NOTHING;
+                        """)
+            paises_inseridos += cur.rowcount or 0
+
+        # Reportar sempre: um código órfão novo é sinal de mudança na origem,
+        # e o silêncio aqui foi o que escondeu o problema até 07/2026.
+        if paises_inseridos:
+            print_log(
+                f"  -> {paises_inseridos} código(s) de país órfão(s) absorvido(s) "
+                f"— ausentes do PAISCSV da RFB",
+                level="warning"
+            )
+
+        conn.commit()
+
+        # =====================================================================
         # FASE 3: DELETEs para remoção de duplicatas/inconsistências
         # =====================================================================
 
