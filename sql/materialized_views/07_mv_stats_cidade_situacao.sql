@@ -10,8 +10,10 @@
 DROP MATERIALIZED VIEW IF EXISTS mv_stats_cidade_situacao CASCADE;
 
 CREATE MATERIALIZED VIEW mv_stats_cidade_situacao AS
-SELECT 
+SELECT
     e.cod_cidade_ibge,
+    e.cod_estado_ibge,
+    e.cod_regiao_ibge,
     e.cod_situacao_cadastral,
     COUNT(*) AS total,
     COUNT(*) FILTER (WHERE e.matriz_filial = '1') AS matrizes,
@@ -19,20 +21,25 @@ SELECT
     COUNT(*) FILTER (WHERE e.telefone_1 IS NOT NULL) AS com_telefone,
     COUNT(*) FILTER (WHERE e.email IS NOT NULL AND e.email != '' AND e.email NOT ILIKE '%contab%') AS email_prospeccao
 FROM estabelecimento e
-GROUP BY e.cod_cidade_ibge, e.cod_situacao_cadastral;
+GROUP BY e.cod_cidade_ibge, e.cod_estado_ibge, e.cod_regiao_ibge, e.cod_situacao_cadastral;
 
 -- Índice único para REFRESH CONCURRENTLY
-CREATE UNIQUE INDEX idx_mv_stats_cidade_situacao_pk 
+CREATE UNIQUE INDEX idx_mv_stats_cidade_situacao_pk
     ON mv_stats_cidade_situacao (cod_cidade_ibge, cod_situacao_cadastral);
 
 -- Índices auxiliares
-CREATE INDEX idx_mv_stats_cidade_situacao_cidade 
+CREATE INDEX idx_mv_stats_cidade_situacao_cidade
     ON mv_stats_cidade_situacao (cod_cidade_ibge);
-CREATE INDEX idx_mv_stats_cidade_situacao_situacao 
+CREATE INDEX idx_mv_stats_cidade_situacao_situacao
     ON mv_stats_cidade_situacao (cod_situacao_cadastral);
+CREATE INDEX idx_mv_stats_cidade_situacao_estado
+    ON mv_stats_cidade_situacao (cod_estado_ibge, cod_situacao_cadastral);
+CREATE INDEX idx_mv_stats_cidade_situacao_regiao
+    ON mv_stats_cidade_situacao (cod_regiao_ibge, cod_situacao_cadastral);
 
-COMMENT ON MATERIALIZED VIEW mv_stats_cidade_situacao IS 
+COMMENT ON MATERIALIZED VIEW mv_stats_cidade_situacao IS
 'Estatísticas agregadas por cidade e situação cadastral.
 Uso principal: Contagens rápidas para filtros de listagem de empresas.
+Inclui cod_estado_ibge/cod_regiao_ibge desnormalizados para recortes estaduais e regionais sem JOIN.
 Evita GROUP BY na tabela estabelecimento (~68M registros).';
 

@@ -10,7 +10,8 @@ from .orchestrator import run_orchestrator
 from .cnpj_data import CNPJDataScraper, CNPJDownloadManager
 from .utils.logger import print_log, set_log_file
 from .utils.run_state import (
-    RunState, run_step, normalize_reference_period, now_iso, STEP_DOWNLOAD
+    RunState, run_step, normalize_reference_period, now_iso,
+    STEP_DOWNLOAD, STEP_VIEWS
 )
 from .utils.webhook import WebhookNotifier
 from .utils.dashboard import start_dashboard
@@ -308,7 +309,23 @@ def _record_stats_finish(
             records_inserted_total=records,
             tables_populated=pipeline_stats.collect_tables_populated(conn),
             files_downloaded=downloads,
+            views_refreshed_at=state.step_finished_at(STEP_VIEWS),
             error=error,
+        )
+    finally:
+        conn.close()
+
+
+def _record_views_refresh(db_name: str) -> None:
+    """Stamps `views_refreshed_at` on the latest run after a manual refresh."""
+    from .db import pipeline_stats
+    conn = _stats_connection(db_name)
+    if conn is None:
+        return
+    try:
+        pipeline_stats.record_views_refresh(
+            conn, refreshed_at=now_iso(),
+            reference_period=RunState.latest_period(),
         )
     finally:
         conn.close()
@@ -559,9 +576,10 @@ def main() -> None:
                 _record_stats_finish(state, db_name, "failed", records=records, error=str(exc))
                 raise
             else:
-                if state:
-                    state.pipeline_finished()
-                _record_stats_finish(state, db_name, "completed", records=records)
+                if is_refresh:
+                    _record_views_refresh(db_name)
+                final_status = state.pipeline_finished() if state else "completed"
+                _record_stats_finish(state, db_name, final_status, records=records)
             finally:
                 _shutdown_dashboard(server, args)
 
@@ -617,9 +635,8 @@ def main() -> None:
                                      downloads=downloads, error=str(exc))
                 raise
             else:
-                if state:
-                    state.pipeline_finished()
-                _record_stats_finish(state, db_name, "completed", records=records,
+                final_status = state.pipeline_finished() if state else "completed"
+                _record_stats_finish(state, db_name, final_status, records=records,
                                      downloads=downloads)
             finally:
                 _shutdown_dashboard(server, args)

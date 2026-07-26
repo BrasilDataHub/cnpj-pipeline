@@ -132,7 +132,9 @@ try:
           f"(status: {schema['status']}, erro: {schema.get('error')})")
     check("step has started_at and finished_at",
           schema["started_at"] and schema["finished_at"])
-    check("overall pipeline status", st["status"] == "completed",
+    # `db init` runs only schema_init: the run ends clean but incomplete,
+    # so it must NOT claim `completed` (the site treats that as "data ready")
+    check("overall pipeline status is partial", st["status"] == "partial",
           f"(got: {st['status']})")
     check("step names are the English public identifiers",
           {s["name"] for s in st["steps"]} >= {"download", "file_validation",
@@ -163,7 +165,8 @@ try:
     check("pipeline_stats recorded the run", row is not None)
     if row:
         check("database run_id matches the JSON one", row[0] == st["run_id"])
-        check("status recorded as completed", row[1] == "completed")
+        check("status recorded as partial (init alone is not a full load)",
+              row[1] == "partial", f"(got: {row[1]})")
         check("finished_at filled in", row[3] is not None)
         check("tables_populated lists the loaded IBGE tables",
               row[4] is not None and len(row[4]) >= 0)

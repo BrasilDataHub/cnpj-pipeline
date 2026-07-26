@@ -371,11 +371,18 @@ Criados automaticamente pelo `db index` (e pelo `db load`/`complete` sem
 
 #### `mv_abertura_periodo`
 - **Colunas:**
-  - `mes_abertura`, `cod_estado_ibge`, `total_aberturas`, `empresas_unicas`, `ainda_ativos`
+  - `mes_abertura`, `cod_cidade_ibge`, `cod_estado_ibge`, `total_aberturas`, `empresas_unicas`, `ainda_ativos`
 - **Índices:**
-  - `idx_mv_abertura_pk` UNIQUE (`mes_abertura`, `cod_estado_ibge`)
+  - `idx_mv_abertura_pk` UNIQUE (`mes_abertura`, `cod_cidade_ibge`, `cod_estado_ibge`)
   - `idx_mv_abertura_mes` (`mes_abertura`)
   - `idx_mv_abertura_estado` (`cod_estado_ibge`)
+  - `idx_mv_abertura_periodo_cidade` (`cod_cidade_ibge`, `mes_abertura`)
+- **Nota:** granularidade municipal; agregados estaduais somam as cidades. Linhas com
+  `cod_cidade_ibge` NULL (estabelecimento sem correspondência IBGE) agrupam por estado —
+  por isso o índice único inclui `cod_estado_ibge`.
+- **Atenção:** `empresas_unicas` é `COUNT(DISTINCT cnpj_basico)` **dentro do município**.
+  Somar cidades superconta empresas com estabelecimentos em mais de um município;
+  para deduplicação exata em recortes maiores, consulte a tabela base.
 
 #### `mv_top_cnaes_cidade`
 - **Colunas:**
@@ -391,11 +398,14 @@ Criados automaticamente pelo `db index` (e pelo `db load`/`complete` sem
 
 #### `mv_stats_cidade_situacao`
 - **Colunas:**
-  - `cod_cidade_ibge`, `cod_situacao_cadastral`, `total`, `matrizes`, `com_email`, `com_telefone`, `email_prospeccao`
+  - `cod_cidade_ibge`, `cod_estado_ibge`, `cod_regiao_ibge`, `cod_situacao_cadastral`
+  - `total`, `matrizes`, `com_email`, `com_telefone`, `email_prospeccao`
 - **Índices:**
   - `idx_mv_stats_cidade_situacao_pk` UNIQUE (`cod_cidade_ibge`, `cod_situacao_cadastral`)
   - `idx_mv_stats_cidade_situacao_cidade` (`cod_cidade_ibge`)
   - `idx_mv_stats_cidade_situacao_situacao` (`cod_situacao_cadastral`)
+  - `idx_mv_stats_cidade_situacao_estado` (`cod_estado_ibge`, `cod_situacao_cadastral`)
+  - `idx_mv_stats_cidade_situacao_regiao` (`cod_regiao_ibge`, `cod_situacao_cadastral`)
 
 #### `mv_regime_tributario_cidade`
 - **Colunas:**
@@ -413,6 +423,7 @@ Criados automaticamente pelo `db index` (e pelo `db load`/`complete` sem
 - **Índices:**
   - `idx_mv_porte_cidade_pk` UNIQUE (`cod_cidade_ibge`, `cod_porte`, `cod_situacao_cadastral`)
   - `idx_mv_porte_cidade_estado` (`cod_estado_ibge`, `cod_porte`, `cod_situacao_cadastral`)
+  - `idx_mv_porte_cidade_regiao` (`cod_regiao_ibge`, `cod_situacao_cadastral`, `cod_porte`)
   - `idx_mv_porte_cidade_porte` (`cod_porte`, `cod_situacao_cadastral`)
 
 #### `mv_stats_natureza_juridica_estado`
@@ -647,13 +658,30 @@ LIMIT 20;
 ### Evolução de aberturas por mês em SP
 
 ```sql
-SELECT 
+-- A MV tem grão municipal; recortes estaduais somam as cidades.
+-- empresas_unicas somado é aproximado (ver nota da MV).
+SELECT
+    mes_abertura,
+    SUM(total_aberturas)  AS total_aberturas,
+    SUM(empresas_unicas)  AS empresas_unicas,
+    SUM(ainda_ativos)     AS ainda_ativos
+FROM mv_abertura_periodo
+WHERE cod_estado_ibge = 35
+  AND mes_abertura >= '2023-01-01'
+GROUP BY mes_abertura
+ORDER BY mes_abertura;
+```
+
+### Evolução de aberturas por mês em um município
+
+```sql
+SELECT
     mes_abertura,
     total_aberturas,
     empresas_unicas,
     ainda_ativos
 FROM mv_abertura_periodo
-WHERE cod_estado_ibge = 35
+WHERE cod_cidade_ibge = 3550308   -- São Paulo/SP
   AND mes_abertura >= '2023-01-01'
 ORDER BY mes_abertura;
 ```

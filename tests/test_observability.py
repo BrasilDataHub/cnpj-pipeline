@@ -242,6 +242,10 @@ try:
     check("emits step_started", "step_started" in events)
     check("emits step_completed", "step_completed" in events)
     check("emits pipeline_completed", "pipeline_completed" in events)
+    # only STEP_LOAD ran: the run is partial, but the event contract
+    # (pipeline_started|completed|failed) is preserved
+    check("incomplete run keeps the pipeline_completed event with status partial",
+          st.data["status"] == "partial", f"(got: {st.data['status']})")
 
     step_ev = next(e for e in received if e["event"] == "step_completed")
     check("payload has the contract keys",

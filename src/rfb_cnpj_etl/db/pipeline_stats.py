@@ -44,11 +44,21 @@ CREATE TABLE IF NOT EXISTS {PIPELINE_STATS_TABLE} (
     tables_populated        JSONB,
     files_downloaded_count  INTEGER,
     files_downloaded_detail JSONB,
+    views_refreshed_at      TIMESTAMPTZ,
     error                   TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_{PIPELINE_STATS_TABLE}_periodo
     ON {PIPELINE_STATS_TABLE} (reference_period, started_at DESC);
 """
+
+# Columns added after the table shipped, migrated in ensure_table(). The ALTER
+# only runs when the column is actually missing: ALTER TABLE takes an ACCESS
+# EXCLUSIVE lock even with IF NOT EXISTS, and an unconditional one would block
+# behind any open reader transaction on every single run.
+MIGRATIONS = (
+    ("views_refreshed_at", f"ALTER TABLE {PIPELINE_STATS_TABLE} "
+                           f"ADD COLUMN IF NOT EXISTS views_refreshed_at TIMESTAMPTZ;"),
+)
 
 
 def ensure_table(conn) -> bool:
@@ -61,6 +71,17 @@ def ensure_table(conn) -> bool:
         conn.autocommit = True
         with conn.cursor() as cur:
             cur.execute(DDL)
+            for column, ddl in MIGRATIONS:
+                cur.execute(
+                    """
+                    SELECT 1 FROM information_schema.columns
+                     WHERE table_schema = 'public'
+                       AND table_name = %s AND column_name = %s;
+                    """,
+                    (PIPELINE_STATS_TABLE, column),
+                )
+                if cur.fetchone() is None:
+                    cur.execute(ddl)
         return True
     except psycopg2.Error as exc:
         print_log(f"NÃO FOI POSSÍVEL CRIAR '{PIPELINE_STATS_TABLE}': {exc}", level="warning")
@@ -128,12 +149,15 @@ def finish_run(
         records_inserted_total: Optional[int] = None,
         tables_populated: Optional[List[Dict[str, Any]]] = None,
         files_downloaded: Optional[List[Dict[str, Any]]] = None,
+        views_refreshed_at: Optional[str] = None,
         error: Optional[str] = None,
 ) -> bool:
     """Closes the run row with the final totals.
 
     `COALESCE` on the numeric fields: a resume that only ran the views must
-    not zero out the record total written by the run that did the load.
+    not zero out the record total written by the run that did the load. Same
+    for `views_refreshed_at`: a partial resume must not erase the timestamp
+    of a views build that already happened.
     """
     if not ensure_table(conn):
         return False
@@ -155,6 +179,7 @@ def finish_run(
                        tables_populated        = COALESCE(%(tables)s::jsonb, tables_populated),
                        files_downloaded_count  = COALESCE(%(count)s, files_downloaded_count),
                        files_downloaded_detail = COALESCE(%(detail)s::jsonb, files_downloaded_detail),
+                       views_refreshed_at      = COALESCE(%(views_at)s::timestamptz, views_refreshed_at),
                        error                   = %(error)s
                  WHERE run_id = %(run_id)s;
                 """,
@@ -165,6 +190,7 @@ def finish_run(
                     "tables": tables,
                     "count": count,
                     "detail": detail,
+                    "views_at": views_refreshed_at,
                     "error": error,
                     "run_id": run_id,
                 },
@@ -172,4 +198,37 @@ def finish_run(
         return True
     except psycopg2.Error as exc:
         print_log(f"FALHA AO FINALIZAR '{PIPELINE_STATS_TABLE}': {exc}", level="warning")
+        return False
+
+
+def record_views_refresh(conn, refreshed_at: str,
+                         reference_period: Optional[str] = None) -> bool:
+    """Stamps `views_refreshed_at` on the most recent run.
+
+    `db views refresh` is maintenance, not a build step: it opens no state
+    and creates no run row. The site still needs to know the MVs changed, so
+    the timestamp lands on the latest run — of the given period when known,
+    of the whole table otherwise. Zero rows updated (no runs yet) is fine.
+    """
+    if not ensure_table(conn):
+        return False
+    try:
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            period_filter = "WHERE reference_period = %(period)s" if reference_period else ""
+            cur.execute(
+                f"""
+                UPDATE {PIPELINE_STATS_TABLE}
+                   SET views_refreshed_at = %(refreshed_at)s
+                 WHERE run_id = (
+                        SELECT run_id FROM {PIPELINE_STATS_TABLE}
+                        {period_filter}
+                        ORDER BY started_at DESC
+                        LIMIT 1);
+                """,
+                {"refreshed_at": refreshed_at, "period": reference_period},
+            )
+        return True
+    except psycopg2.Error as exc:
+        print_log(f"FALHA AO REGISTRAR REFRESH DE VIEWS EM '{PIPELINE_STATS_TABLE}': {exc}", level="warning")
         return False

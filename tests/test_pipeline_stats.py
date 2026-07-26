@@ -98,7 +98,8 @@ try:
     expected = {
         "run_id", "reference_period", "status", "started_at", "finished_at",
         "duration_seconds", "records_inserted_total", "tables_populated",
-        "files_downloaded_count", "files_downloaded_detail", "error",
+        "files_downloaded_count", "files_downloaded_detail",
+        "views_refreshed_at", "error",
     }
     check("all spec columns exist", expected <= set(columns),
           f"(missing: {expected - set(columns)})")
@@ -110,6 +111,23 @@ try:
     check("tables_populated is jsonb", columns.get("tables_populated") == "jsonb")
     check("files_downloaded_detail is jsonb",
           columns.get("files_downloaded_detail") == "jsonb")
+    check("views_refreshed_at is timestamptz",
+          columns.get("views_refreshed_at") == "timestamp with time zone",
+          f"(got: {columns.get('views_refreshed_at')})")
+
+    # --- migration: a pre-existing table without the column gains it
+    with conn.cursor() as cur:
+        conn.autocommit = True
+        cur.execute("ALTER TABLE pipeline_stats DROP COLUMN views_refreshed_at;")
+    pipeline_stats.ensure_table(conn)
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT count(*) FROM information_schema.columns
+             WHERE table_name = 'pipeline_stats'
+               AND column_name = 'views_refreshed_at';
+        """)
+        check("ensure_table migrates views_refreshed_at into old tables",
+              cur.fetchone()[0] == 1)
 
     # --- full lifecycle
     run_id = str(uuid.uuid4())
@@ -136,11 +154,13 @@ try:
          "source_url": "https://exemplo/Socios0.zip", "downloaded_at": now_iso()},
     ]
     time.sleep(1)   # guarantees duration > 0
+    views_ts = now_iso()
     check("finish_run closes the run", pipeline_stats.finish_run(
         conn, run_id=run_id, finished_at=now_iso(), status="completed",
         records_inserted_total=218_380_000,
         tables_populated=[{"table": "estabelecimento", "rows": 72318968}],
         files_downloaded=downloads,
+        views_refreshed_at=views_ts,
     ))
 
     with conn.cursor() as cur:
@@ -162,15 +182,63 @@ try:
           set(detail[0]) == {"filename", "size_bytes", "source_url", "downloaded_at"},
           f"(got: {sorted(detail[0])})")
 
+    with conn.cursor() as cur:
+        cur.execute("SELECT views_refreshed_at FROM pipeline_stats WHERE run_id=%s",
+                    (run_id,))
+        check("views_refreshed_at written by finish_run",
+              cur.fetchone()[0] is not None)
+
     # --- a partial resume must not zero out what was already measured
     pipeline_stats.finish_run(conn, run_id=run_id, finished_at=now_iso(),
                               status="completed")
     with conn.cursor() as cur:
-        cur.execute("SELECT records_inserted_total, files_downloaded_count "
-                    "FROM pipeline_stats WHERE run_id=%s", (run_id,))
+        cur.execute("SELECT records_inserted_total, files_downloaded_count, "
+                    "views_refreshed_at FROM pipeline_stats WHERE run_id=%s",
+                    (run_id,))
         r2 = cur.fetchone()
     check("resume without metrics preserves the previous totals",
           r2[0] == 218_380_000 and r2[1] == 2, f"(got: {r2})")
+    check("resume without views preserves views_refreshed_at",
+          r2[2] is not None)
+
+    # --- partial status (run ended clean but with required steps pending)
+    partial_id = str(uuid.uuid4())
+    pipeline_stats.start_run(conn, partial_id, "2026-07", now_iso())
+    pipeline_stats.finish_run(conn, run_id=partial_id, finished_at=now_iso(),
+                              status="partial")
+    with conn.cursor() as cur:
+        cur.execute("SELECT status FROM pipeline_stats WHERE run_id=%s",
+                    (partial_id,))
+        check("finish_run records status=partial", cur.fetchone()[0] == "partial")
+
+    # --- record_views_refresh stamps the most recent run of the period
+    print("\nrecord_views_refresh — manual refresh signal")
+    other_id = str(uuid.uuid4())
+    pipeline_stats.start_run(conn, other_id, "2026-06", now_iso())
+    stamp = now_iso()
+    check("record_views_refresh returns True",
+          pipeline_stats.record_views_refresh(conn, stamp,
+                                              reference_period="2026-06"))
+    with conn.cursor() as cur:
+        cur.execute("SELECT views_refreshed_at FROM pipeline_stats WHERE run_id=%s",
+                    (other_id,))
+        check("stamps the run of the given period", cur.fetchone()[0] is not None)
+        cur.execute("SELECT views_refreshed_at FROM pipeline_stats WHERE run_id=%s",
+                    (partial_id,))
+        first_partial_stamp = cur.fetchone()[0]
+        check("does not touch runs of other periods when period is given",
+              first_partial_stamp is None)
+    check("record_views_refresh without period targets the latest run",
+          pipeline_stats.record_views_refresh(conn, now_iso()))
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT views_refreshed_at FROM pipeline_stats
+             ORDER BY started_at DESC LIMIT 1;
+        """)
+        check("latest run got the stamp", cur.fetchone()[0] is not None)
+    check("record_views_refresh on a period with no runs is a no-op",
+          pipeline_stats.record_views_refresh(conn, now_iso(),
+                                              reference_period="1999-01"))
 
     # --- the historical query the spec wants to enable
     with conn.cursor() as cur:

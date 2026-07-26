@@ -334,6 +334,16 @@ python etl.py db views refresh
 python etl.py db views refresh --concurrent
 ```
 
+Sobre o registro em `pipeline_stats`:
+- `db views create` participa do estado e pode fechar a execução do período
+  como `completed` quando for a última etapa obrigatória pendente;
+- `db views refresh` não abre estado nem cria linha própria, mas **carimba
+  `views_refreshed_at`** na execução mais recente do período — é o sinal que
+  consumidores (ex.: o site) usam para saber que as MVs mudaram;
+- subcomandos isolados que terminam sem completar todas as etapas obrigatórias
+  gravam `status = 'partial'`, nunca `completed` (ver
+  [Observabilidade](observabilidade.md)).
+
 ### Materialized Views disponíveis
 
 | View | Descrição | Tempo estimado |
@@ -342,7 +352,7 @@ python etl.py db views refresh --concurrent
 | `mv_stats_municipio` | Estatísticas agregadas por município | ~5 min |
 | `mv_stats_cnae` | Estatísticas agregadas por CNAE | ~3 min |
 | `mv_stats_cnae_estado` | Estatísticas detalhadas CNAE x Estado | ~10 min |
-| `mv_abertura_periodo` | Aberturas por mês/estado (desde 2000) | ~8 min |
+| `mv_abertura_periodo` | Aberturas por mês/cidade (desde 2000) | ~10 min |
 | `mv_top_cnaes_cidade` | Top 20 CNAEs por cidade | ~15 min |
 | `mv_stats_cidade_situacao` | Estatísticas por cidade x situação cadastral | ~8 min |
 | `mv_regime_tributario_cidade` | Regime tributário (Simples/MEI) por cidade | ~8 min |

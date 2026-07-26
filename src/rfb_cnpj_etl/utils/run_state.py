@@ -63,10 +63,31 @@ PIPELINE_STEPS: List[str] = [
     STEP_VIEWS,
 ]
 
+# Steps that must be `success` before a run may be reported as `completed`.
+# Excludes the steps a legitimate load can skip by flag (`--skip-download`,
+# `--skip-validation`, `--skip-index`): requiring them would keep valid runs
+# from ever completing. `materialized_views` is required on purpose — the
+# site treats `completed` as "data ready", and data is not ready until the
+# MVs exist (see docs/observabilidade.md).
+COMPLETION_REQUIRED_STEPS: List[str] = [
+    STEP_SCHEMA,
+    STEP_LOAD,
+    STEP_PATCHES,
+    STEP_LOGGED,
+    STEP_PK,
+    STEP_FK,
+    STEP_SEARCH,
+    STEP_VIEWS,
+]
+
 STATUS_PENDING = "pending"
 STATUS_RUNNING = "running"
 STATUS_SUCCESS = "success"
 STATUS_FAILED = "failed"
+
+# Terminal run status for a run that ended without failure but with required
+# steps still pending (e.g. `db load` alone, `complete --skip-views`).
+STATUS_PARTIAL = "partial"
 
 DEFAULT_MAX_ATTEMPTS = 3
 
@@ -259,6 +280,17 @@ class RunState:
         return (step.get("status") == STATUS_FAILED
                 and int(step.get("attempts") or 0) >= self.max_attempts)
 
+    def is_pipeline_complete(self) -> bool:
+        """True when every completion-required step is `success`."""
+        return all(self.is_done(name) for name in COMPLETION_REQUIRED_STEPS)
+
+    def step_finished_at(self, name: str) -> Optional[str]:
+        """`finished_at` of a step, but only if it completed successfully."""
+        step = self._step(name)
+        if step and step.get("status") == STATUS_SUCCESS:
+            return step.get("finished_at")
+        return None
+
     # -- transitions ------------------------------------------------------
 
     def start(self, name: str) -> None:
@@ -344,15 +376,32 @@ class RunState:
         self.save()
         self._notify("pipeline_started", None)
 
-    def pipeline_finished(self) -> None:
-        """Closes the state. Only marks `completed` when no executed step failed."""
+    def pipeline_finished(self) -> str:
+        """Closes the state and returns the terminal status.
+
+        `completed` only when every completion-required step (including the
+        materialized views) is `success` — the site's cache invalidation
+        relies on `completed` meaning "data ready". A run that ended without
+        failure but with required steps pending is `partial`.
+
+        The webhook event stays `pipeline_completed` for both `completed` and
+        `partial`: the event contract (`pipeline_started|completed|failed`)
+        predates `partial`, and the distinction lives in the status field.
+        """
         any_failed = any(s.get("status") == STATUS_FAILED
                          for s in self.data.get("steps", []))
-        self.data["status"] = "failed" if any_failed else "completed"
+        if any_failed:
+            status = STATUS_FAILED
+        elif self.is_pipeline_complete():
+            status = "completed"
+        else:
+            status = STATUS_PARTIAL
+        self.data["status"] = status
         self.save()
         self._notify(
             "pipeline_failed" if any_failed else "pipeline_completed", None
         )
+        return status
 
     def pipeline_failed(self, error: BaseException) -> None:
         self.data["status"] = "failed"

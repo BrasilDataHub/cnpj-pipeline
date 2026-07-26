@@ -28,9 +28,11 @@ CREATE UNIQUE INDEX idx_mv_porte_cidade_pk
     ON mv_porte_cidade (cod_cidade_ibge, cod_porte, cod_situacao_cadastral);
 
 -- Índices auxiliares para consultas por estado/região
-CREATE INDEX idx_mv_porte_cidade_estado 
+CREATE INDEX idx_mv_porte_cidade_estado
     ON mv_porte_cidade (cod_estado_ibge, cod_porte, cod_situacao_cadastral);
-CREATE INDEX idx_mv_porte_cidade_porte 
+CREATE INDEX idx_mv_porte_cidade_regiao
+    ON mv_porte_cidade (cod_regiao_ibge, cod_situacao_cadastral, cod_porte);
+CREATE INDEX idx_mv_porte_cidade_porte
     ON mv_porte_cidade (cod_porte, cod_situacao_cadastral);
 
 COMMENT ON MATERIALIZED VIEW mv_porte_cidade IS 

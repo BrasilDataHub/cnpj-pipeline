@@ -142,7 +142,7 @@ da origem** (isolado e documentado, sem condenar o fluxo):
 | `run_id` | UUID v4 | identifica a execução; preservado nas retomadas, novo a cada `--force` |
 | `reference_period` | `AAAA-MM` | período dos dados da RFB |
 | `created_at` / `updated_at` | ISO 8601 **com offset** | nunca sem fuso |
-| `status` | `in_progress` \| `completed` \| `failed` | estado geral |
+| `status` | `in_progress` \| `completed` \| `partial` \| `failed` | estado geral; `completed` **garante** que todas as etapas obrigatórias — inclusive `materialized_views` — concluíram; `partial` = terminou sem falha, mas incompleto (ex.: `db load` isolado, `--skip-views`) |
 | `steps[].name` | string | nome da etapa (tabela acima) |
 | `steps[].status` | `pending` \| `running` \| `success` \| `failed` | — |
 | `steps[].started_at` / `finished_at` | ISO 8601 com offset \| `null` | — |
@@ -188,12 +188,25 @@ CREATE TABLE pipeline_stats (
     tables_populated        JSONB,
     files_downloaded_count  INTEGER,
     files_downloaded_detail JSONB,
+    views_refreshed_at      TIMESTAMPTZ,
     error                   TEXT
 );
 ```
 
 Instantes são `TIMESTAMPTZ` — data, hora e fuso num único campo, nunca em
 colunas separadas.
+
+**Semântica de `status`.** `completed` só é gravado quando todas as etapas
+obrigatórias do estado — incluindo `materialized_views` — estão `success`; é o
+sinal seguro para consumidores (o site invalida o cache ao ver uma execução
+nova `completed`). Execuções que terminam sem falha mas incompletas (`db init`,
+`db load`, subcomandos isolados, `complete --skip-views`) recebem `partial`.
+
+**`views_refreshed_at`.** Instante em que as MVs ficaram prontas: preenchido
+pelo `views-create` da carga e atualizado por `db views refresh` (que não cria
+linha própria — carimba a execução mais recente do período). Consumidores que
+aquecem cache a partir das MVs podem observar esta coluna em vez de esperar uma
+execução nova.
 
 **A tabela sobrevive à recarga.** `drop_tables()` varre `pg_tables` do schema
 `public`; `pipeline_stats` está na lista de preservação
