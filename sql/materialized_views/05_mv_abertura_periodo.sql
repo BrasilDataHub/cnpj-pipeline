@@ -24,7 +24,7 @@
 DROP MATERIALIZED VIEW IF EXISTS mv_abertura_periodo CASCADE;
 
 CREATE MATERIALIZED VIEW mv_abertura_periodo AS
-WITH ancora AS (
+WITH ancora AS MATERIALIZED (
     SELECT fn_mes_ancora() AS mes_ancora
 ),
 movimentacao AS (

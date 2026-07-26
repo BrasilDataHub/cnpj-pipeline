@@ -15,6 +15,16 @@
 DROP MATERIALIZED VIEW IF EXISTS mv_stats_cnae CASCADE;
 
 CREATE MATERIALIZED VIEW mv_stats_cnae AS
+WITH janelas AS MATERIALIZED (
+    SELECT a.mes_ancora,
+           a.mes_ancora                                  AS ini_1mes,
+           (a.mes_ancora - INTERVAL '5 months')::DATE    AS ini_6meses,
+           (a.mes_ancora - INTERVAL '11 months')::DATE   AS ini_1ano,
+           (a.mes_ancora - INTERVAL '23 months')::DATE   AS ini_2anos,
+           (a.mes_ancora - INTERVAL '47 months')::DATE   AS ini_4anos,
+           (a.mes_ancora + INTERVAL '1 month')::DATE     AS fim_exclusivo
+      FROM (SELECT fn_mes_ancora() AS mes_ancora) a
+)
 SELECT
     e.cod_cnae_principal,
     c.nome_cnae,
@@ -38,16 +48,7 @@ SELECT
     j.mes_ancora
 FROM estabelecimento e
 LEFT JOIN cnae c ON e.cod_cnae_principal = c.cod_cnae
-CROSS JOIN (
-    SELECT a.mes_ancora,
-           a.mes_ancora                                  AS ini_1mes,
-           (a.mes_ancora - INTERVAL '5 months')::DATE    AS ini_6meses,
-           (a.mes_ancora - INTERVAL '11 months')::DATE   AS ini_1ano,
-           (a.mes_ancora - INTERVAL '23 months')::DATE   AS ini_2anos,
-           (a.mes_ancora - INTERVAL '47 months')::DATE   AS ini_4anos,
-           (a.mes_ancora + INTERVAL '1 month')::DATE     AS fim_exclusivo
-      FROM (SELECT fn_mes_ancora() AS mes_ancora) a
-) j
+CROSS JOIN janelas j
 GROUP BY e.cod_cnae_principal, c.nome_cnae, j.mes_ancora;
 
 -- Índices

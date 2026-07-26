@@ -20,7 +20,22 @@
 DROP MATERIALIZED VIEW IF EXISTS mv_stats_estado CASCADE;
 
 -- Criar nova view com métricas corrigidas
+--
+-- ATENÇÃO: a CTE `janelas` PRECISA ser MATERIALIZED. Sem a cerca, o planner
+-- faz pull-up do subquery e inline de `fn_mes_ancora()` dentro dos FILTER,
+-- reavaliando a função (plpgsql, ~9 ms) POR LINHA — 72M linhas transformam um
+-- build de minutos em horas. Com MATERIALIZED, a função roda exatamente uma vez.
 CREATE MATERIALIZED VIEW mv_stats_estado AS
+WITH janelas AS MATERIALIZED (
+    SELECT a.mes_ancora,
+           a.mes_ancora                                  AS ini_1mes,
+           (a.mes_ancora - INTERVAL '5 months')::DATE    AS ini_6meses,
+           (a.mes_ancora - INTERVAL '11 months')::DATE   AS ini_1ano,
+           (a.mes_ancora - INTERVAL '23 months')::DATE   AS ini_2anos,
+           (a.mes_ancora - INTERVAL '47 months')::DATE   AS ini_4anos,
+           (a.mes_ancora + INTERVAL '1 month')::DATE     AS fim_exclusivo
+      FROM (SELECT fn_mes_ancora() AS mes_ancora) a
+)
 SELECT
     e.cod_estado_ibge,
     est.sigla_uf,
@@ -77,16 +92,7 @@ SELECT
 
 FROM estabelecimento e
 INNER JOIN ibge_estado est ON e.cod_estado_ibge = est.cod_estado_ibge
-CROSS JOIN (
-    SELECT a.mes_ancora,
-           a.mes_ancora                                  AS ini_1mes,
-           (a.mes_ancora - INTERVAL '5 months')::DATE    AS ini_6meses,
-           (a.mes_ancora - INTERVAL '11 months')::DATE   AS ini_1ano,
-           (a.mes_ancora - INTERVAL '23 months')::DATE   AS ini_2anos,
-           (a.mes_ancora - INTERVAL '47 months')::DATE   AS ini_4anos,
-           (a.mes_ancora + INTERVAL '1 month')::DATE     AS fim_exclusivo
-      FROM (SELECT fn_mes_ancora() AS mes_ancora) a
-) j
+CROSS JOIN janelas j
 GROUP BY
     e.cod_estado_ibge,
     est.sigla_uf,

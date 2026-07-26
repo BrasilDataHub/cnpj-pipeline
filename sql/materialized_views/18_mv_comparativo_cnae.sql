@@ -19,7 +19,7 @@
 DROP MATERIALIZED VIEW IF EXISTS mv_comparativo_cnae CASCADE;
 
 CREATE MATERIALIZED VIEW mv_comparativo_cnae AS
-WITH ancora AS (
+WITH ancora AS MATERIALIZED (
     SELECT fn_mes_ancora() AS mes_ancora
 ),
 janelas AS (

@@ -14,7 +14,7 @@ DROP MATERIALIZED VIEW IF EXISTS mv_top_cnaes_cidade CASCADE;
 
 -- 2. Criar a view atualizada com as novas colunas
 CREATE MATERIALIZED VIEW mv_top_cnaes_cidade AS
-WITH janela AS (
+WITH janela AS MATERIALIZED (
     SELECT a.mes_ancora,
            a.mes_ancora                                  AS ini_1mes,
            (a.mes_ancora - INTERVAL '5 months')::DATE    AS ini_6meses,
