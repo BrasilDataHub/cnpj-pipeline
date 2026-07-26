@@ -694,9 +694,17 @@ class PostgresBuilder:
         """
         cur.execute("SET work_mem = %s", (MV_BUILD_WORK_MEM,))
         cur.execute("SET maintenance_work_mem = %s", (MV_BUILD_MAINTENANCE_WORK_MEM,))
+        # Parallel hash joins allocate their hash table in dynamic shared
+        # memory (/dev/shm), sized by work_mem — with 1 GB that bursts the
+        # default 64 MB shm of a dockerized Postgres ("could not resize shared
+        # memory segment ... No space left on device", seen in production on
+        # mv_stats_natureza_juridica_cnae). Leader-only execution keeps every
+        # allocation in local memory and works on any host without shm tuning.
+        cur.execute("SET max_parallel_workers_per_gather = 0")
         print_log(
             f"SESSÃO DE BUILD: work_mem={MV_BUILD_WORK_MEM}, "
-            f"maintenance_work_mem={MV_BUILD_MAINTENANCE_WORK_MEM}",
+            f"maintenance_work_mem={MV_BUILD_MAINTENANCE_WORK_MEM}, "
+            "max_parallel_workers_per_gather=0",
             level="docs",
         )
 
