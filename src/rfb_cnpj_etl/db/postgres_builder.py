@@ -4,6 +4,7 @@
 PostgreSQL database construction module.
 """
 
+import os
 import time
 import psycopg2
 from pathlib import Path
@@ -23,6 +24,14 @@ from ..config import PIPELINE_STATS_TABLE, INDEX_MAX_WORKERS, INDEX_MAINTENANCE_
 # Metadata tables that drop_tables() must not remove: they hold the run
 # history and are independent from the RFB data.
 PRESERVED_TABLES = {PIPELINE_STATS_TABLE}
+
+# Session memory for MV builds/refreshes. The default work_mem (32 MB) turns
+# the count(DISTINCT) aggregates over the 72M-row estabelecimento table into
+# an external merge sort measured in hours; 1 GB keeps even the largest group
+# (SP) fully in memory. Session-scoped on purpose: the server-wide setting
+# stays untouched for the website's short queries.
+MV_BUILD_WORK_MEM = os.getenv("MV_BUILD_WORK_MEM", "1GB")
+MV_BUILD_MAINTENANCE_WORK_MEM = os.getenv("MV_BUILD_MAINTENANCE_WORK_MEM", "2GB")
 
 # Which MV files must be rebuilt together, keyed by file-name prefix.
 # The comparison MVs read the monthly series, so `DROP MATERIALIZED VIEW ...
@@ -643,6 +652,7 @@ class PostgresBuilder:
                 self.conn = self._connect()
             self.conn.autocommit = True
             cur = self.conn.cursor()
+            self._apply_mv_session_settings(cur)
 
             for i, sql_file in enumerate(sql_files, start=1):
                 file_name = sql_file.name
@@ -674,6 +684,21 @@ class PostgresBuilder:
             if self.conn:
                 self.conn.close()
                 self.conn = None
+
+    @staticmethod
+    def _apply_mv_session_settings(cur) -> None:
+        """Raises the session memory limits for MV builds/refreshes.
+
+        SET is session-scoped: it dies with the connection and never touches
+        the server configuration used by the website's queries.
+        """
+        cur.execute("SET work_mem = %s", (MV_BUILD_WORK_MEM,))
+        cur.execute("SET maintenance_work_mem = %s", (MV_BUILD_MAINTENANCE_WORK_MEM,))
+        print_log(
+            f"SESSÃO DE BUILD: work_mem={MV_BUILD_WORK_MEM}, "
+            f"maintenance_work_mem={MV_BUILD_MAINTENANCE_WORK_MEM}",
+            level="docs",
+        )
 
     @staticmethod
     def _mv_refresh_order(cur) -> list:
@@ -760,6 +785,7 @@ class PostgresBuilder:
                 self.conn = self._connect()
             self.conn.autocommit = True
             cur = self.conn.cursor()
+            self._apply_mv_session_settings(cur)
 
             # Existing MVs whose name starts with mv_, dependencies first.
             mv_names = self._mv_refresh_order(cur)
