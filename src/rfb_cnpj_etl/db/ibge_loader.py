@@ -1,5 +1,5 @@
 """
-Carga das tabelas de referência IBGE (região, estado, cidade) a partir dos CSVs locais.
+Loading of the IBGE reference tables (region, state, city) from the local CSVs.
 """
 
 from typing import Dict, List, Optional
@@ -19,14 +19,14 @@ def _insert_many_postgres(conn, table: str, columns: List[str], rows: List[List]
     cur.close()
 
 
-def carregar_tabelas_ibge(postgres_config: Optional[Dict] = None):
+def load_ibge_tables(postgres_config: Optional[Dict] = None):
     """
-    Popular as tabelas regiao/estado/cidade antes da carga principal.
+    Populate the regiao/estado/cidade tables before the main load.
     """
     lookup = IBGELookup()
-    referencias = lookup.get_reference_rows()
+    reference_rows = lookup.get_reference_rows()
 
-    if not referencias:
+    if not reference_rows:
         print_log(
             "TABELAS IBGE NÃO CARREGADAS (CSVs ausentes ou inválidos). As colunas IBGE serão preenchidas como NULL.",
             level="warning"
@@ -46,14 +46,14 @@ def carregar_tabelas_ibge(postgres_config: Optional[Dict] = None):
         cur.close()
 
         _insert_many_postgres(conn, "ibge_regiao", ["cod_regiao_ibge", "sigla_regiao", "nome_regiao"],
-                              referencias["ibge_regiao"])
+                              reference_rows["ibge_regiao"])
         _insert_many_postgres(conn, "ibge_estado",
                               ["cod_estado_ibge", "sigla_uf", "nome_estado", "latitude", "longitude", "cod_regiao_ibge"],
-                              referencias["ibge_estado"])
+                              reference_rows["ibge_estado"])
         _insert_many_postgres(conn, "ibge_cidade",
                               ["cod_cidade_ibge", "nome_cidade", "latitude", "longitude", "capital", "cod_estado_ibge",
                                "cod_municipio", "ddd", "fuso_horario"],
-                              referencias["ibge_cidade"])
+                              reference_rows["ibge_cidade"])
 
         conn.commit()
         print_log("TABELAS IBGE ATUALIZADAS", level="success")

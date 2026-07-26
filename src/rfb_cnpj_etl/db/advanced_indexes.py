@@ -1,51 +1,51 @@
 # db/advanced_indexes.py
 
 """
-Define índices avançados para otimização de consultas na base CNPJ.
+Defines advanced indexes for query optimization on the CNPJ dataset.
 
-Estes índices são ADICIONAIS aos índices básicos definidos em schema.py.
-Incluem:
-- GIN (pg_trgm): Para busca textual com ILIKE '%termo%'
-- BRIN: Para colunas de data naturalmente ordenadas (economia de espaço)
-- HASH: Para lookups exatos de alta performance
-- Índices parciais: Para subconjuntos frequentemente consultados
-- Índices compostos: Para consultas específicas de negócio
+These indexes are ADDITIONAL to the basic indexes defined in schema.py.
+They include:
+- GIN (pg_trgm): For text search with ILIKE '%term%'
+- BRIN: For naturally ordered date columns (space savings)
+- HASH: For high performance exact lookups
+- Partial indexes: For frequently queried subsets
+- Composite indexes: For specific business queries
 
-Espaço estimado: ~20 GB (adicional aos índices do ETL)
-Tempo estimado de criação: 30-45 minutos (com paralelismo)
+Estimated space: ~20 GB (in addition to the ETL indexes)
+Estimated creation time: 30-45 minutes (with parallelism)
 """
 
-# Extensões necessárias para os índices avançados e para a operação do banco:
-# - pg_trgm: busca textual com ILIKE '%termo%' (índices GIN trigram)
-# - unaccent: normalização de acentos no dado (tabela de busca enxuta, AG13)
-# - pg_stat_statements: diagnóstico de queries em produção; a coleta exige
-#   shared_preload_libraries=pg_stat_statements na instância (config em infra/),
-#   mas o CREATE EXTENSION é seguro mesmo sem o preload.
+# Extensions required by the advanced indexes and by the database operation:
+# - pg_trgm: text search with ILIKE '%term%' (GIN trigram indexes)
+# - unaccent: accent normalization on the data (lean search table, AG13)
+# - pg_stat_statements: query diagnostics in production; collection requires
+#   shared_preload_libraries=pg_stat_statements on the instance (config in infra/),
+#   but the CREATE EXTENSION is safe even without the preload.
 REQUIRED_EXTENSIONS = ['pg_trgm', 'unaccent', 'pg_stat_statements']
 
-# Configurações de performance para criação de índices
+# Performance settings for index creation
 INDEX_CREATION_CONFIG = {
     'max_parallel_maintenance_workers': 4,
     'maintenance_work_mem': '2GB'
 }
 
-# Definição dos índices avançados
-# Estrutura:
-#   name: Nome do índice
-#   table: Tabela onde será criado
-#   type: Tipo do índice (BTREE, GIN, BRIN, HASH) - default BTREE
-#   columns: Lista de colunas
-#   ops: Operador especial (ex: gin_trgm_ops, varchar_pattern_ops)
-#   where: Cláusula WHERE para índices parciais
-#   include: Colunas para INCLUDE (covering index)
-#   options: Opções WITH (ex: pages_per_range para BRIN)
+# Definition of the advanced indexes
+# Structure:
+#   name: Index name
+#   table: Table where it will be created
+#   type: Index type (BTREE, GIN, BRIN, HASH) - default BTREE
+#   columns: List of columns
+#   ops: Special operator (e.g.: gin_trgm_ops, varchar_pattern_ops)
+#   where: WHERE clause for partial indexes
+#   include: Columns for INCLUDE (covering index)
+#   options: WITH options (e.g.: pages_per_range for BRIN)
 
 ADVANCED_INDEXES = [
     # =========================================================================
-    # ESTABELECIMENTO - Localização (complementares)
+    # ESTABELECIMENTO - Location (complementary)
     # =========================================================================
-    # idx_estab_ddd removido (AG9): coberto por idx_estab_ddd1_covering
-    # (parcial + covering). Ver docs/index_cleanup.md.
+    # idx_estab_ddd removed (AG9): covered by idx_estab_ddd1_covering
+    # (partial + covering). See docs/index_cleanup.md.
     {
         'name': 'idx_estab_cep',
         'table': 'estabelecimento',
@@ -58,7 +58,7 @@ ADVANCED_INDEXES = [
     },
 
     # =========================================================================
-    # ESTABELECIMENTO - CNAEs (complementares)
+    # ESTABELECIMENTO - CNAEs (complementary)
     # =========================================================================
     {
         'name': 'idx_estab_cnae_estado',
@@ -72,7 +72,7 @@ ADVANCED_INDEXES = [
     },
 
     # =========================================================================
-    # ESTABELECIMENTO - Datas (BRIN - economia de 95% de espaço)
+    # ESTABELECIMENTO - Dates (BRIN - 95% space savings)
     # =========================================================================
     {
         'name': 'idx_estab_data_inicio_brin',
@@ -83,10 +83,10 @@ ADVANCED_INDEXES = [
     },
 
     # =========================================================================
-    # ESTABELECIMENTO - Situação Cadastral / Tipo
+    # ESTABELECIMENTO - Registration Status / Type
     # =========================================================================
-    # idx_estab_matriz_filial removido (AG9): cardinalidade 2, inútil como
-    # índice isolado. Ver docs/index_cleanup.md.
+    # idx_estab_matriz_filial removed (AG9): cardinality 2, useless as a
+    # standalone index. See docs/index_cleanup.md.
     {
         'name': 'idx_estab_ativas',
         'table': 'estabelecimento',
@@ -95,10 +95,10 @@ ADVANCED_INDEXES = [
     },
 
     # =========================================================================
-    # ESTABELECIMENTO - Paginação por Cursor (Keyset/Infinite Scroll)
-    # Índices parciais para estabelecimentos ativos, ordenados por cnpj_completo.
-    # Suportam consultas com WHERE cod_X = ? AND cnpj_completo > ? ORDER BY cnpj_completo
-    # sem necessidade de COUNT(*) para paginação.
+    # ESTABELECIMENTO - Cursor Pagination (Keyset/Infinite Scroll)
+    # Partial indexes for active establishments, ordered by cnpj_completo.
+    # They support queries with WHERE cod_X = ? AND cnpj_completo > ? ORDER BY cnpj_completo
+    # without needing COUNT(*) for pagination.
     # =========================================================================
     {
         'name': 'idx_estab_cidade_ativas_cnpj',
@@ -120,11 +120,11 @@ ADVANCED_INDEXES = [
     },
 
     # =========================================================================
-    # ESTABELECIMENTO - Busca Textual (GIN + pg_trgm)
+    # ESTABELECIMENTO - Text Search (GIN + pg_trgm)
     # =========================================================================
-    # idx_estab_nome_fantasia_prefix removido (AG9): com collation C do
-    # banco, o btree comum idx_estab_nome_fantasia já atende prefixo —
-    # o varchar_pattern_ops era duplicata exata (1,0 GB).
+    # idx_estab_nome_fantasia_prefix removed (AG9): with the database's C
+    # collation, the plain btree idx_estab_nome_fantasia already handles prefixes —
+    # the varchar_pattern_ops was an exact duplicate (1.0 GB).
     {
         'name': 'idx_estab_nome_fantasia_trgm',
         'table': 'estabelecimento',
@@ -134,7 +134,7 @@ ADVANCED_INDEXES = [
     },
 
     # =========================================================================
-    # ESTABELECIMENTO - Contatos
+    # ESTABELECIMENTO - Contacts
     # =========================================================================
     {
         'name': 'idx_estab_email',
@@ -156,13 +156,13 @@ ADVANCED_INDEXES = [
     },
 
     # =========================================================================
-    # ESTABELECIMENTO - CNPJ Completo
-    # idx_estab_cnpj_completo_hash removido (AG9): a PK btree já resolve
-    # igualdade; o hash era duplicata de 2,0 GB sem ganho mensurável.
+    # ESTABELECIMENTO - Full CNPJ
+    # idx_estab_cnpj_completo_hash removed (AG9): the btree PK already handles
+    # equality; the hash was a 2.0 GB duplicate with no measurable gain.
     # =========================================================================
 
     # =========================================================================
-    # ESTABELECIMENTO - Compostos (Consultas Reais de Negócio)
+    # ESTABELECIMENTO - Composite (Real Business Queries)
     # =========================================================================
     {
         'name': 'idx_estab_prospeccao',
@@ -192,15 +192,15 @@ ADVANCED_INDEXES = [
     },
 
     # =========================================================================
-    # EMPRESA (complementares)
+    # EMPRESA (complementary)
     # =========================================================================
     {
         'name': 'idx_empresa_capital',
         'table': 'empresa',
         'columns': ['capital_social']
     },
-    # idx_empresa_razao_social_prefix removido (AG9): duplicata exata do
-    # btree idx_empresa_razao_social com collation C (3,7 GB).
+    # idx_empresa_razao_social_prefix removed (AG9): exact duplicate of the
+    # btree idx_empresa_razao_social with C collation (3.7 GB).
     {
         'name': 'idx_empresa_razao_social_trgm',
         'table': 'empresa',
@@ -210,7 +210,7 @@ ADVANCED_INDEXES = [
     },
 
     # =========================================================================
-    # ESTABELECIMENTO_CNAE_SEC (CNAEs Secundários)
+    # ESTABELECIMENTO_CNAE_SEC (Secondary CNAEs)
     # =========================================================================
     {
         'name': 'idx_cnae_sec_cnae',
@@ -240,10 +240,10 @@ ADVANCED_INDEXES = [
     },
 
     # =========================================================================
-    # SÓCIO (complementares)
+    # SOCIO (complementary)
     # =========================================================================
-    # idx_socio_nome_prefix removido (AG9): duplicata exata do btree
-    # idx_socio_nome com collation C (0,8 GB).
+    # idx_socio_nome_prefix removed (AG9): exact duplicate of the btree
+    # idx_socio_nome with C collation (0.8 GB).
     {
         'name': 'idx_socio_nome_trgm',
         'table': 'socio',
@@ -253,15 +253,15 @@ ADVANCED_INDEXES = [
     },
 
     # =========================================================================
-    # OTIMIZAÇÃO: ALTA PRIORIDADE
-    # Índices para resolver problemas críticos de performance identificados
-    # na análise do banco de dados em produção (DATABASE_OPTIMIZATION_REPORT.md)
+    # OPTIMIZATION: HIGH PRIORITY
+    # Indexes to solve critical performance problems identified
+    # in the production database analysis (DATABASE_OPTIMIZATION_REPORT.md)
     # =========================================================================
 
     # -------------------------------------------------------------------------
-    # Índices compostos para TODAS as situações cadastrais (não apenas ativas)
-    # Resolve: Consultas de empresas inativas/baixadas que faziam table scan
-    # Impacto: Queries de 300-500ms → <10ms
+    # Composite indexes for ALL registration statuses (not only active ones)
+    # Solves: Queries for inactive/closed companies that were doing a table scan
+    # Impact: Queries from 300-500ms → <10ms
     # -------------------------------------------------------------------------
     {
         'name': 'idx_estab_cidade_situacao_cnpj',
@@ -277,9 +277,9 @@ ADVANCED_INDEXES = [
     },
 
     # -------------------------------------------------------------------------
-    # SIMPLES NACIONAL / MEI - Índices Parciais
-    # Resolve: Filtros por regime tributário faziam scan em ~46M registros
-    # Impacto: Queries de 500-800ms → <50ms
+    # SIMPLES NACIONAL / MEI - Partial Indexes
+    # Solves: Filters by tax regime were scanning ~46M records
+    # Impact: Queries from 500-800ms → <50ms
     # -------------------------------------------------------------------------
     {
         'name': 'idx_simples_opcao_simples',
@@ -297,13 +297,13 @@ ADVANCED_INDEXES = [
     },
 
     # =========================================================================
-    # OTIMIZAÇÃO: MÉDIA PRIORIDADE
-    # Índices compostos para filtros combinados frequentes
+    # OPTIMIZATION: MEDIUM PRIORITY
+    # Composite indexes for frequent combined filters
     # =========================================================================
 
     # -------------------------------------------------------------------------
-    # Cidade + CNAE + Situação (substitui índices sem situação)
-    # Resolve: Filtros combinados CNAE + localidade + situação
+    # City + CNAE + Status (replaces indexes without status)
+    # Solves: Combined filters CNAE + location + status
     # -------------------------------------------------------------------------
     {
         'name': 'idx_estab_cidade_cnae_situacao',
@@ -319,8 +319,8 @@ ADVANCED_INDEXES = [
     },
 
     # -------------------------------------------------------------------------
-    # EMPRESA - Índices compostos para JOINs otimizados
-    # Resolve: Filtros por porte/natureza jurídica que requerem JOIN
+    # EMPRESA - Composite indexes for optimized JOINs
+    # Solves: Filters by company size/legal nature that require a JOIN
     # -------------------------------------------------------------------------
     {
         'name': 'idx_empresa_porte_cnpj',
@@ -336,12 +336,12 @@ ADVANCED_INDEXES = [
     },
 
     # =========================================================================
-    # OTIMIZAÇÃO: BAIXA PRIORIDADE
-    # Índices adicionais para casos específicos
+    # OPTIMIZATION: LOW PRIORITY
+    # Additional indexes for specific cases
     # =========================================================================
 
     # -------------------------------------------------------------------------
-    # DDD com Covering Index (mais eficiente que índice simples)
+    # DDD with Covering Index (more efficient than a plain index)
     # -------------------------------------------------------------------------
     {
         'name': 'idx_estab_ddd1_covering',
@@ -353,7 +353,7 @@ ADVANCED_INDEXES = [
     },
 
     # -------------------------------------------------------------------------
-    # Bairro - Busca textual com trigrams
+    # Neighborhood - Text search with trigrams
     # -------------------------------------------------------------------------
     {
         'name': 'idx_estab_bairro_trgm',
@@ -365,7 +365,7 @@ ADVANCED_INDEXES = [
     },
 
     # -------------------------------------------------------------------------
-    # Email sem "contab" - Índice parcial para prospecção
+    # Email without "contab" - Partial index for prospecting
     # -------------------------------------------------------------------------
     {
         'name': 'idx_estab_email_prospeccao',
@@ -376,16 +376,16 @@ ADVANCED_INDEXES = [
     },
 
     # =========================================================================
-    # OTIMIZAÇÃO: SITEMAPS
-    # Índices compostos para queries de geração de sitemaps.
-    # Complementam os índices existentes que possuem ordem de colunas invertida
-    # e não atendem eficientemente filtros que começam por cod_estado_ibge.
+    # OPTIMIZATION: SITEMAPS
+    # Composite indexes for sitemap generation queries.
+    # They complement the existing indexes, which have an inverted column order
+    # and do not efficiently serve filters starting with cod_estado_ibge.
     # =========================================================================
 
     # -------------------------------------------------------------------------
-    # Empresas por UF (company.py → _generate_company_urls_for_state)
+    # Companies by state (company.py → _generate_company_urls_for_state)
     # Query: WHERE matriz_filial = '1' AND cod_estado_ibge = %s ORDER BY cnpj_basico
-    # Existente idx_estab_estado_ibge é simples; este composto elimina sort.
+    # The existing idx_estab_estado_ibge is a plain index; this composite one eliminates the sort.
     # -------------------------------------------------------------------------
     {
         'name': 'idx_estab_estado_matriz_cnpj',
@@ -395,9 +395,9 @@ ADVANCED_INDEXES = [
     },
 
     # -------------------------------------------------------------------------
-    # CNAEs por estado (cnae.py → _get_state_cnaes)
+    # CNAEs by state (cnae.py → _get_state_cnaes)
     # Query: WHERE cod_estado_ibge = %s GROUP BY cod_cnae ...
-    # Existente idx_estab_cnae_estado tem ordem invertida (cnae, estado).
+    # The existing idx_estab_cnae_estado has an inverted order (cnae, state).
     # -------------------------------------------------------------------------
     {
         'name': 'idx_estab_estado_cnae',
@@ -407,9 +407,9 @@ ADVANCED_INDEXES = [
     },
 
     # -------------------------------------------------------------------------
-    # CNAEs por cidade (cnae.py → _get_city_cnaes)
+    # CNAEs by city (cnae.py → _get_city_cnaes)
     # Query: WHERE cod_estado_ibge = %s GROUP BY cod_cidade_ibge, cod_cnae ...
-    # Query mais pesada do fluxo; nenhum índice existente cobre este padrão.
+    # The heaviest query of the flow; no existing index covers this pattern.
     # -------------------------------------------------------------------------
     {
         'name': 'idx_estab_estado_cidade_cnae',
@@ -422,14 +422,14 @@ ADVANCED_INDEXES = [
 
 def build_create_index_sql(index_def: dict, concurrent: bool = True) -> str:
     """
-    Constrói a instrução SQL para criação de um índice baseado na definição.
-    
+    Builds the SQL statement for creating an index based on its definition.
+
     Args:
-        index_def: Dicionário com a definição do índice
-        concurrent: Se True, usa CREATE INDEX CONCURRENTLY
-        
+        index_def: Dictionary with the index definition
+        concurrent: If True, uses CREATE INDEX CONCURRENTLY
+
     Returns:
-        String SQL para criação do índice
+        SQL string for creating the index
     """
     name = index_def['name']
     table = index_def['table']
@@ -439,47 +439,47 @@ def build_create_index_sql(index_def: dict, concurrent: bool = True) -> str:
     where = index_def.get('where')
     include = index_def.get('include')
     options = index_def.get('options')
-    
-    # Construir lista de colunas
+
+    # Build the column list
     if ops:
-        # Operador especial (gin_trgm_ops, varchar_pattern_ops)
+        # Special operator (gin_trgm_ops, varchar_pattern_ops)
         cols_str = ', '.join(f'"{col}" {ops}' for col in columns)
     else:
         cols_str = ', '.join(f'"{col}"' for col in columns)
-    
-    # Montar SQL base
+
+    # Assemble the base SQL
     concurrent_str = 'CONCURRENTLY ' if concurrent else ''
-    
+
     if index_type.upper() == 'BTREE':
         sql = f'CREATE INDEX {concurrent_str}IF NOT EXISTS "{name}" ON public."{table}" ({cols_str})'
     else:
         sql = f'CREATE INDEX {concurrent_str}IF NOT EXISTS "{name}" ON public."{table}" USING {index_type} ({cols_str})'
-    
-    # Adicionar INCLUDE (covering index)
+
+    # Add INCLUDE (covering index)
     if include:
         include_str = ', '.join(f'"{col}"' for col in include)
         sql += f' INCLUDE ({include_str})'
-    
-    # Adicionar WITH options (ex: BRIN pages_per_range)
+
+    # Add WITH options (e.g.: BRIN pages_per_range)
     if options:
         opts_str = ', '.join(f'{k} = {v}' for k, v in options.items())
         sql += f' WITH ({opts_str})'
-    
-    # Adicionar WHERE (índice parcial)
+
+    # Add WHERE (partial index)
     if where:
         sql += f' WHERE {where}'
-    
+
     sql += ';'
-    
+
     return sql
 
 
 def get_indexes_by_table() -> dict:
     """
-    Agrupa os índices avançados por tabela.
-    
+    Groups the advanced indexes by table.
+
     Returns:
-        Dict onde chave é nome da tabela e valor é lista de definições de índices
+        Dict where the key is the table name and the value is a list of index definitions
     """
     indexes_by_table = {}
     for idx in ADVANCED_INDEXES:

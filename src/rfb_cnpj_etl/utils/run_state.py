@@ -1,20 +1,20 @@
 # utils/run_state.py
 
 """
-Estado de execução do pipeline — checkpoint e retomada tolerante a falhas.
+Pipeline run state — fault-tolerant checkpointing and resume.
 
-O estado vive num JSON por **período de referência dos dados** (o mês dos
-arquivos da RFB), não por data civil de execução. Um pipeline que baixou os
-arquivos de 07/2026 no dia 25 e foi retomado no dia 26 continua no mesmo
-`pipeline_state_2026-07.json` — a janela é do dado, não do relógio.
+The state lives in one JSON per **data reference period** (the month of the
+RFB files), not per calendar day of execution. A pipeline that downloaded the
+07/2026 files on the 25th and was resumed on the 26th continues in the same
+`pipeline_state_2026-07.json` — the window belongs to the data, not the clock.
 
-Motivação concreta: em 25/07/2026 o ETL rodou 6h43 e morreu na última etapa
-(materialized views). Sem estado, a única forma de retomar era saber de cabeça
-qual subcomando executar; um `complete` ingênuo teria derrubado as tabelas e
-recomeçado do zero. Com o estado, as etapas concluídas são puladas.
+Concrete motivation: on 2026-07-25 the ETL ran for 6h43 and died on the last
+step (materialized views). Without state, the only way to resume was knowing
+by heart which subcommand to run; a naive `complete` would have dropped the
+tables and started from scratch. With state, completed steps are skipped.
 
-Escrita atômica (tmp + os.replace): uma queda no meio do dump não corrompe o
-arquivo, que é justamente o que se precisa ler depois de uma queda.
+Atomic writes (tmp + os.replace): a crash mid-dump cannot corrupt the file,
+which is exactly what needs to be readable after a crash.
 """
 
 import json
@@ -29,36 +29,37 @@ from typing import Any, Dict, List, Optional
 from .logger import print_log
 from ..config import STATE_DIR
 
-# Intervalo mínimo entre gravações de progresso intra-etapa. A carga chama o
-# callback a cada lote (centenas de vezes); sem esta folga o estado viraria
-# I/O de disco no meio do COPY.
+# Minimum interval between intra-step progress writes. The load calls the
+# callback on every batch (hundreds of times); without this slack the state
+# file would become disk I/O in the middle of COPY.
 PROGRESS_MIN_INTERVAL_SECONDS = 2.0
 
-# Etapas do pipeline, na ordem de execução. Os nomes são a chave pública do
-# estado, do dashboard e dos webhooks — mudá-los invalida estados já gravados.
-STEP_DOWNLOAD = "download_arquivos"
-STEP_VALIDACAO = "validacao_arquivos"
+# Pipeline steps, in execution order. These names are the public key of the
+# state file, the dashboard and the webhooks — changing them invalidates
+# previously written state files.
+STEP_DOWNLOAD = "download"
+STEP_VALIDATION = "file_validation"
 STEP_SCHEMA = "schema_init"
-STEP_CARGA = "carga_dados"
+STEP_LOAD = "data_load"
 STEP_PATCHES = "patches"
-STEP_LOGGED = "tabelas_logged"
-STEP_PK = "chaves_primarias"
-STEP_INDICES = "indices"
-STEP_FK = "chaves_estrangeiras"
-STEP_BUSCA = "tabela_busca"
+STEP_LOGGED = "tables_logged"
+STEP_PK = "primary_keys"
+STEP_INDEXES = "indexes"
+STEP_FK = "foreign_keys"
+STEP_SEARCH = "search_table"
 STEP_VIEWS = "materialized_views"
 
 PIPELINE_STEPS: List[str] = [
     STEP_DOWNLOAD,
-    STEP_VALIDACAO,
+    STEP_VALIDATION,
     STEP_SCHEMA,
-    STEP_CARGA,
+    STEP_LOAD,
     STEP_PATCHES,
     STEP_LOGGED,
     STEP_PK,
-    STEP_INDICES,
+    STEP_INDEXES,
     STEP_FK,
-    STEP_BUSCA,
+    STEP_SEARCH,
     STEP_VIEWS,
 ]
 
@@ -71,25 +72,26 @@ DEFAULT_MAX_ATTEMPTS = 3
 
 
 def now_iso() -> str:
-    """Timestamp ISO 8601 com offset de fuso (ex.: 2026-07-25T14:32:10-03:00).
+    """ISO 8601 timestamp with timezone offset (e.g. 2026-07-25T14:32:10-03:00).
 
-    `astimezone()` sem argumento adota o fuso local — nunca gravamos horário
-    sem offset, porque um estado lido noutra máquina viraria ambiguidade.
+    `astimezone()` without arguments adopts the local timezone — we never
+    write a naive timestamp, because state read on another machine would
+    become ambiguous.
     """
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
 def normalize_reference_period(month_year: Optional[str]) -> Optional[str]:
-    """Converte "MM/AAAA" (formato do CLI) em "AAAA-MM" (chave do estado).
+    """Converts "MM/YYYY" (CLI format) into "YYYY-MM" (state key).
 
-    Aceita também "AAAA-MM" já normalizado, para ser idempotente.
+    Also accepts an already-normalized "YYYY-MM", to stay idempotent.
     """
     if not month_year:
         return None
     value = str(month_year).strip()
     if "/" in value:
-        mm, aaaa = value.split("/", 1)
-        return f"{aaaa.strip()}-{mm.strip().zfill(2)}"
+        mm, yyyy = value.split("/", 1)
+        return f"{yyyy.strip()}-{mm.strip().zfill(2)}"
     if "-" in value:
         head, tail = value.split("-", 1)
         if len(head) == 4:
@@ -98,7 +100,7 @@ def normalize_reference_period(month_year: Optional[str]) -> Optional[str]:
 
 
 class RunState:
-    """Estado persistente de uma execução, indexado pelo período dos dados."""
+    """Persistent state of a run, keyed by the data reference period."""
 
     def __init__(
             self,
@@ -112,37 +114,38 @@ class RunState:
         self.state_dir = Path(state_dir) if state_dir else STATE_DIR
         self.max_attempts = max_attempts
         self.notifier = notifier
-        # Chamada ao fim de cada etapa para atualizar o bloco `database` —
-        # é o que faz o dashboard mostrar o banco crescendo durante a carga.
+        # Called at the end of each step to refresh the `database` block —
+        # this is what makes the dashboard show the database growing during
+        # the load.
         self.db_info_fn = db_info_fn
         self.path = self.state_dir / f"pipeline_state_{reference_period}.json"
         self.data: Dict[str, Any] = {}
-        # A carga é multi-thread: o progresso vem de vários workers.
+        # The load is multi-threaded: progress comes from several workers.
         self._lock = threading.Lock()
-        self._ultimo_progresso = 0.0
+        self._last_progress_write = 0.0
 
-    # -- ciclo de vida ------------------------------------------------------
+    # -- lifecycle ------------------------------------------------------
 
     @staticmethod
     def latest_period(state_dir: Optional[Path] = None) -> Optional[str]:
-        """Período do estado modificado mais recentemente, se houver.
+        """Period of the most recently modified state file, if any.
 
-        Serve aos comandos avulsos (`db fk`, `db views create`), que não
-        recebem `--month`: sem isto, uma retomada manual abriria um estado
-        novo em vez de continuar o do período em andamento.
+        Serves the standalone commands (`db fk`, `db views create`), which do
+        not receive `--month`: without this, a manual resume would open a new
+        state instead of continuing the period in progress.
         """
         base = Path(state_dir) if state_dir else STATE_DIR
         if not base.is_dir():
             return None
-        arquivos = sorted(
+        state_files = sorted(
             base.glob("pipeline_state_*.json"),
             key=lambda p: p.stat().st_mtime,
             reverse=True,
         )
-        if not arquivos:
+        if not state_files:
             return None
-        nome = arquivos[0].stem              # pipeline_state_2026-07
-        return nome.replace("pipeline_state_", "", 1) or None
+        stem = state_files[0].stem              # pipeline_state_2026-07
+        return stem.replace("pipeline_state_", "", 1) or None
 
     @classmethod
     def load_or_create(
@@ -154,11 +157,11 @@ class RunState:
             notifier=None,
             db_info_fn=None,
     ) -> "RunState":
-        """Carrega o estado do período ou cria um novo.
+        """Loads the period's state or creates a new one.
 
-        Com `force`, o estado anterior é preservado como `.bak-<timestamp>`
-        antes de ser substituído — nunca se descarta a evidência do que
-        aconteceu na execução anterior sem deixar cópia.
+        With `force`, the previous state is preserved as `.bak-<timestamp>`
+        before being replaced — evidence of what happened in the previous run
+        is never discarded without a copy.
         """
         state = cls(reference_period, state_dir=state_dir,
                     max_attempts=max_attempts, notifier=notifier,
@@ -182,7 +185,7 @@ class RunState:
         return state
 
     def _read(self) -> bool:
-        """Lê o JSON do disco. Um arquivo corrompido não pode travar o pipeline."""
+        """Reads the JSON from disk. A corrupted file must not block the pipeline."""
         try:
             self.data = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
@@ -192,19 +195,19 @@ class RunState:
             )
             return False
 
-        # Um estado gravado por uma versão anterior pode não conhecer etapas
-        # novas; completa o que faltar em vez de descartar o progresso.
-        existentes = {s.get("name") for s in self.data.get("steps", [])}
+        # State written by an older version may not know about newer steps;
+        # fill in whatever is missing instead of discarding the progress.
+        existing = {s.get("name") for s in self.data.get("steps", [])}
         for name in PIPELINE_STEPS:
-            if name not in existentes:
+            if name not in existing:
                 self.data.setdefault("steps", []).append(self._new_step(name))
 
-        concluidas = sum(1 for s in self.data.get("steps", [])
-                         if s.get("status") == STATUS_SUCCESS)
-        if concluidas:
+        completed = sum(1 for s in self.data.get("steps", [])
+                        if s.get("status") == STATUS_SUCCESS)
+        if completed:
             print_log(
                 f"ESTADO ENCONTRADO PARA {self.reference_period}: "
-                f"{concluidas}/{len(PIPELINE_STEPS)} ETAPAS JÁ CONCLUÍDAS",
+                f"{completed}/{len(PIPELINE_STEPS)} ETAPAS JÁ CONCLUÍDAS",
                 level="docs"
             )
         return True
@@ -232,7 +235,7 @@ class RunState:
             "metadata": {},
         }
 
-    # -- acesso -------------------------------------------------------------
+    # -- access ---------------------------------------------------------
 
     @property
     def run_id(self) -> str:
@@ -249,14 +252,14 @@ class RunState:
         return bool(step and step.get("status") == STATUS_SUCCESS)
 
     def exhausted(self, name: str) -> bool:
-        """True se a etapa já falhou vezes demais para ser retentada."""
+        """True when the step has already failed too many times to be retried."""
         step = self._step(name)
         if not step or self.max_attempts <= 0:
             return False
         return (step.get("status") == STATUS_FAILED
                 and int(step.get("attempts") or 0) >= self.max_attempts)
 
-    # -- transições ---------------------------------------------------------
+    # -- transitions ------------------------------------------------------
 
     def start(self, name: str) -> None:
         step = self._step(name)
@@ -270,23 +273,23 @@ class RunState:
         self.save()
         self._notify("step_started", step)
 
-    def progress(self, name: str, **campos: Any) -> None:
-        """Publica progresso *dentro* de uma etapa em andamento.
+    def progress(self, name: str, **fields: Any) -> None:
+        """Publishes progress *within* a running step.
 
-        Pensada para ser chamada com frequência alta (por lote de COPY, por
-        arquivo baixado): acumula em memória e só grava a cada
-        `PROGRESS_MIN_INTERVAL_SECONDS`. Não dispara webhook — seriam
-        centenas de POSTs por etapa.
+        Designed to be called at high frequency (per COPY batch, per file
+        downloaded): it accumulates in memory and only writes every
+        `PROGRESS_MIN_INTERVAL_SECONDS`. It does not fire webhooks — that
+        would be hundreds of POSTs per step.
         """
         with self._lock:
             step = self._step(name)
             if step is None:
                 return
-            step.setdefault("metadata", {}).update(campos)
-            agora = time.monotonic()
-            if agora - self._ultimo_progresso < PROGRESS_MIN_INTERVAL_SECONDS:
+            step.setdefault("metadata", {}).update(fields)
+            now = time.monotonic()
+            if now - self._last_progress_write < PROGRESS_MIN_INTERVAL_SECONDS:
                 return
-            self._ultimo_progresso = agora
+            self._last_progress_write = now
         self.save()
 
     def success(self, name: str, metadata: Optional[Dict[str, Any]] = None) -> None:
@@ -298,12 +301,12 @@ class RunState:
         step["error"] = None
         if metadata:
             step.setdefault("metadata", {}).update(metadata)
-        self._atualizar_banco()
+        self._refresh_database_info()
         self.save()
         self._notify("step_completed", step)
 
-    def _atualizar_banco(self) -> None:
-        """Refresca o bloco `database` (tamanho, conexões) se houver coletor."""
+    def _refresh_database_info(self) -> None:
+        """Refreshes the `database` block (size, connections) if a collector exists."""
         if self.db_info_fn is None:
             return
         try:
@@ -311,14 +314,14 @@ class RunState:
             if info:
                 self.data["database"] = info
         except Exception:
-            pass   # informativo: jamais interfere na etapa
+            pass   # informational: must never interfere with the step
 
-    def set_environment(self, ambiente: Dict[str, Any], banco: Dict[str, Any]) -> None:
-        """Grava o retrato do ambiente e do banco no estado."""
-        if ambiente:
-            self.data["environment"] = ambiente
-        if banco:
-            self.data["database"] = banco
+    def set_environment(self, environment: Dict[str, Any], database: Dict[str, Any]) -> None:
+        """Stores the environment and database snapshot in the state."""
+        if environment:
+            self.data["environment"] = environment
+        if database:
+            self.data["database"] = database
         self.save()
 
     def fail(self, name: str, error: BaseException) -> None:
@@ -333,7 +336,7 @@ class RunState:
         self._notify("step_failed", step)
 
     def skip(self, name: str) -> None:
-        """Registra que a etapa foi pulada por já estar concluída."""
+        """Records that the step was skipped because it is already complete."""
         print_log(f"ETAPA JÁ CONCLUÍDA, PULANDO: {name}", level="docs")
 
     def pipeline_started(self) -> None:
@@ -342,13 +345,13 @@ class RunState:
         self._notify("pipeline_started", None)
 
     def pipeline_finished(self) -> None:
-        """Fecha o estado. Só marca `completed` se toda etapa executada foi bem."""
-        houve_falha = any(s.get("status") == STATUS_FAILED
-                          for s in self.data.get("steps", []))
-        self.data["status"] = "failed" if houve_falha else "completed"
+        """Closes the state. Only marks `completed` when no executed step failed."""
+        any_failed = any(s.get("status") == STATUS_FAILED
+                         for s in self.data.get("steps", []))
+        self.data["status"] = "failed" if any_failed else "completed"
         self.save()
         self._notify(
-            "pipeline_failed" if houve_falha else "pipeline_completed", None
+            "pipeline_failed" if any_failed else "pipeline_completed", None
         )
 
     def pipeline_failed(self, error: BaseException) -> None:
@@ -357,13 +360,14 @@ class RunState:
         self.save()
         self._notify("pipeline_failed", None)
 
-    # -- persistência -------------------------------------------------------
+    # -- persistence -------------------------------------------------------
 
     def save(self) -> None:
-        """Grava o JSON de forma atômica.
+        """Writes the JSON atomically.
 
-        Falha ao salvar nunca derruba o pipeline: o estado é instrumentação,
-        não a carga. Perder o checkpoint é ruim; perder 6h de ETL é pior.
+        A failed save never brings the pipeline down: the state is
+        instrumentation, not the load. Losing the checkpoint is bad; losing
+        6 hours of ETL is worse.
         """
         self.data["updated_at"] = now_iso()
         tmp = self.path.with_suffix(".json.tmp")
@@ -389,14 +393,14 @@ class RunState:
 
 
 def run_step(state: Optional[RunState], name: str, fn, metadata_fn=None):
-    """Executa `fn` sob o controle do estado.
+    """Executes `fn` under state control.
 
-    Sem estado (`state is None`), apenas executa — é o que mantém o
-    comportamento idêntico ao anterior quando o rastreamento está desligado.
+    Without state (`state is None`), it just executes — which keeps behavior
+    identical to the pre-state era when tracking is off.
 
-    Etapa já concluída é pulada; etapa que falhou vezes demais aborta com uma
-    instrução acionável em vez de repetir o mesmo erro indefinidamente (o caso
-    de um cron que reexecuta sozinho).
+    An already-completed step is skipped; a step that failed too many times
+    aborts with an actionable instruction instead of repeating the same error
+    forever (the cron-that-reruns-itself scenario).
     """
     if state is None:
         return fn()
@@ -414,15 +418,15 @@ def run_step(state: Optional[RunState], name: str, fn, metadata_fn=None):
 
     state.start(name)
     try:
-        resultado = fn()
+        result = fn()
     except BaseException as exc:
         state.fail(name, exc)
         raise
     metadata = None
     if metadata_fn is not None:
         try:
-            metadata = metadata_fn(resultado)
+            metadata = metadata_fn(result)
         except Exception:
-            metadata = None   # metadado é acessório; nunca quebra a etapa
+            metadata = None   # metadata is accessory; it never breaks the step
     state.success(name, metadata=metadata)
-    return resultado
+    return result

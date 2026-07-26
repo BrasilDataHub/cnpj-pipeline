@@ -1,36 +1,101 @@
 # Configuração e Personalização
 
-## Constantes Globais
-
-Todas as **constantes globais** como diretórios, downloads simultâneos, entre outras, podem ser ajustadas em
-`src/rfb_cnpj_etl/config.py`.
-
-| Variável | Descrição | Padrão |
-|----------|-----------|--------|
-| `DOWNLOAD_DIR` | Diretório de downloads | `data/downloads` |
-| `DOWNLOAD_MAX_CONCURRENTS` | Downloads simultâneos | `10` |
-| `POSTGRES` | Credenciais do PostgreSQL | `localhost:5432` |
-| `BATCH_SIZE` | Tamanho do lote de inserção | `250000` |
+Este documento é a **referência canônica** de variáveis de ambiente e constantes do
+pipeline. As demais páginas (README, guia Docker, observabilidade) apontam para cá.
 
 ## Variáveis de Ambiente
 
-As configurações também podem ser definidas via variáveis de ambiente:
+Todas as variáveis podem ser definidas no ambiente ou no arquivo `.env` na raiz do
+projeto (valores já presentes no ambiente têm prioridade sobre o `.env`). Copie o
+modelo com `cp .env.example .env`.
 
-| Variável | Descrição |
-|----------|-----------|
-| `POSTGRES_HOST` | Host do PostgreSQL |
-| `POSTGRES_PORT` | Porta do PostgreSQL |
-| `POSTGRES_USER` | Usuário do PostgreSQL |
-| `POSTGRES_PASSWORD` | Senha do PostgreSQL |
-| `POSTGRES_DBNAME` | Nome do banco de dados |
-| `DOWNLOAD_PATH` | Diretório para downloads |
-| `IBGE_CSV_DIR` | Diretório dos CSVs do IBGE |
-| `LOG_FILE` | Caminho do arquivo de log (arquivo ou diretório) |
+### Conexão com o PostgreSQL
+
+| Variável | Descrição | Padrão |
+|----------|-----------|--------|
+| `POSTGRES_HOST` | Host do PostgreSQL | `localhost` |
+| `POSTGRES_PORT` | Porta do PostgreSQL | `5432` |
+| `POSTGRES_USER` | Usuário do PostgreSQL | `postgres` |
+| `POSTGRES_PASSWORD` | Senha do PostgreSQL | `sua_senha_aqui` |
+| `POSTGRES_DBNAME` | Nome do banco de dados | `dados_cnpj` |
+
+### Diretórios e origem dos dados
+
+| Variável | Descrição | Padrão |
+|----------|-----------|--------|
+| `DOWNLOAD_PATH` | Diretório para os ZIPs baixados | `data/downloads` |
+| `IBGE_CSV_DIR` | Diretório dos CSVs do IBGE (regiões/estados/cidades) | `data/locations` |
+| `PIPELINE_STATE_DIR` | Diretório do estado de execução (checkpoint/retomada) | `data/state` |
+| `PIPELINE_DEAD_LETTER_DIR` | Diretório onde lotes de COPY que falharam definitivamente são preservados para reprocessamento (`db dead-letter --retry`) | `data/logs/dead_letter` |
+| `RFB_WEBDAV_URL` | URL base WebDAV (Nextcloud) da Receita Federal — altere se o token público mudar | URL oficial da RFB |
+| `LOG_FILE` | Caminho do arquivo de log (arquivo, diretório ou padrão com `{date}`) | `data/logs/etl-<AAAA-MM-DD>.log` |
+
+Caminhos relativos são resolvidos contra a raiz do projeto.
+
+### Observabilidade (estado, dashboard, webhooks)
+
+Guia completo: [Observabilidade](observabilidade.md).
+
+| Variável | Descrição | Padrão |
+|----------|-----------|--------|
+| `PIPELINE_WEBHOOK_URL` | URL para notificações HTTP por etapa (opt-in) | *(desligado)* |
+| `PIPELINE_PORT` | Porta do dashboard (`--serve`) | `3010` |
+| `PIPELINE_REFRESH_SECONDS` | Intervalo inicial de atualização da página do dashboard | `6` |
+| `PIPELINE_DASHBOARD_USER` | Usuário do Basic Auth do dashboard | `pipeline` |
+| `PIPELINE_DASHBOARD_PASSWORD` | Senha do Basic Auth; vazia = uma é gerada e exibida no log a cada execução | *(gerada)* |
+| `PIPELINE_MAX_ATTEMPTS` | Tentativas por etapa antes de exigir intervenção (`0` = ilimitado) | `3` |
+
+### Criação de índices
+
+O banco de carga nunca tem usuários durante o pipeline (o site só troca a conexão
+depois da conclusão), então os índices são criados **sem** `CONCURRENTLY` e em
+paralelo — o objetivo é o menor tempo total.
+
+| Variável | Descrição | Padrão |
+|----------|-----------|--------|
+| `INDEX_MAX_WORKERS` | Conexões simultâneas na criação de índices | `4` |
+| `INDEX_MAINTENANCE_WORK_MEM` | `maintenance_work_mem` aplicado em cada conexão de worker | `2GB` |
+
+> **Memória**: o pico é aproximadamente `INDEX_MAX_WORKERS × INDEX_MAINTENANCE_WORK_MEM`
+> (com o padrão, até ~8 GB do lado do Postgres). Em hosts com 8–16 GB de RAM,
+> reduza um dos dois (ex.: `INDEX_MAINTENANCE_WORK_MEM=512MB`).
+
+### Somente docker-compose
+
+Estas variáveis são lidas pelo `docker-compose.yaml`, nunca pelo Python:
+`FORWARD_DB_PORT`, `FORWARD_DASHBOARD_PORT`, `IMAGE_TAG`, `DADOS_READ_PASSWORD`,
+`ETL_UID`/`ETL_GID` e o tuning do Postgres (`PG_SHARED_BUFFERS`,
+`PG_EFFECTIVE_CACHE_SIZE`, `PG_WORK_MEM`, `PG_MAINTENANCE_WORK_MEM`,
+`PG_MAX_WAL_SIZE`, `PG_RANDOM_PAGE_COST`, `PG_SHM_SIZE`, `PG_MEMORY_LIMIT`).
+Detalhes no [Guia Docker](docker.md).
+
+## Constantes Globais
+
+Constantes ajustáveis apenas editando `src/rfb_cnpj_etl/config.py`:
+
+| Constante | Descrição | Padrão |
+|-----------|-----------|--------|
+| `DEFAULT_PARALLEL` | Paralelismo da carga (`--parallel`) | `True` |
+| `DEFAULT_LOW_MEMORY` | Modo de memória reduzida (`--low-memory`) | `False` |
+| `BATCH_SIZE` | Registros por lote de COPY | `250_000` |
+| `BATCH_RATIO` | Multiplicador do lote por tabela (`estabelecimento` usa lotes menores por ter linhas largas) | `{"estabelecimento": 0.4}` |
+| `WORKER_THREADS` | Threads consumidoras da carga | `CPUs - 1` |
+| `QUEUE_SIZE` | Tamanho da fila de inserção (back-pressure) | `max(4, 2×threads)` |
+| `AVG_COMPRESSED_LINE_SIZE_BYTES` | Heurística bytes/linha para estimar o total de registros (só alimenta a barra de progresso) | `35` |
+| `BRAZIL_COUNTRY_CODES` | Códigos RFB que representam Brasil no enriquecimento IBGE | `{"105", "0105"}` |
+| `DOWNLOAD_CHUNK_SIZE` | Tamanho do chunk de download (bytes) | `8_192` |
+| `DOWNLOAD_CHUNK_TIMEOUT` | Timeout por requisição de chunk (s) | `60` |
+| `DOWNLOAD_MAX_RETRIES` | Tentativas por arquivo antes de falhar | `100` |
+| `DOWNLOAD_MAX_CONCURRENTS` | Downloads simultâneos padrão (`--workers`) | `10` |
+| `DEBUG_LOG` | `True` troca a barra de progresso por linhas de log detalhadas | `False` |
+| `PIPELINE_STATS_TABLE` | Nome da tabela de estatísticas por execução | `pipeline_stats` |
 
 ## Chaves Primárias, Estrangeiras e Índices
 
-As definições de chaves primárias, estrangeiras e índices podem ser encontradas em `src/rfb_cnpj_etl/db/schema.py`.
-Edite conforme a sua necessidade.
+As definições de tabelas, chaves primárias, estrangeiras e índices básicos ficam em
+`src/rfb_cnpj_etl/db/schema.py`; os índices avançados (GIN, BRIN, HASH, parciais,
+compostos) em `src/rfb_cnpj_etl/db/advanced_indexes.py`. Edite conforme a sua
+necessidade. O catálogo completo está em [Banco de Dados](database.md).
 
 ---
 
@@ -54,36 +119,34 @@ O arquivo recebe apenas as **mensagens de etapa** (com horário e tempo
 decorrido). As barras de progresso do `tqdm` vão só para o terminal — elas se
 redesenham com `\r` e não fariam sentido em arquivo.
 
-### Configuração via variável de ambiente
+### Formas aceitas em `LOG_FILE`/`--log-file`
 
-Defina `LOG_FILE` para sobrescrever o caminho padrão. Exemplos:
+| Valor | Resultado |
+|-------|-----------|
+| *(vazio)* | `data/logs/etl-<AAAA-MM-DD>.log` |
+| Diretório (`data/logs/`) | `<dir>/etl-<AAAA-MM-DD>.log` |
+| Arquivo com extensão (`etl.log`) | `etl-<AAAA-MM-DD>.log` (data antes da extensão) |
+| Nome sem extensão (`etl`) | `etl-<AAAA-MM-DD>.log` |
+| Com placeholder (`etl-{date}.log`) | `{date}` substituído por `AAAA-MM-DD` |
+
+Sempre há carimbo de data no nome — não existe modo "arquivo único".
 
 ```bash
-# Diretório (gera etl-YYYY-MM-DD.log dentro dele)
-export LOG_FILE=data/logs/
-
-# Arquivo (insere a data antes da extensão)
-export LOG_FILE=data/logs/etl.log
-
-# Com placeholder de data
+# Via variável de ambiente
 export LOG_FILE=data/logs/etl-{date}.log
-```
 
-### Configuração via CLI
-
-Use `--log-file` para sobrescrever a variável de ambiente:
-
-```bash
-python etl.py complete --log-file /var/log/etl/etl-{date}.log
+# Via CLI (tem prioridade sobre a variável; vem ANTES do subcomando)
+python etl.py --log-file /var/log/etl/etl-{date}.log complete
 ```
 
 ---
 
-## Materialized Views (Opcionais)
+## Materialized Views
 
-As Materialized Views pré-calculam estatísticas agregadas, reduzindo consultas de minutos para milissegundos.
-
-### Criação via CLI (Recomendado)
+As Materialized Views pré-calculam estatísticas agregadas, reduzindo consultas de
+minutos para milissegundos. Elas são criadas **automaticamente ao final do
+`complete`** (a menos que se use `--skip-views`) e podem ser gerenciadas de forma
+avulsa:
 
 ```bash
 # Criar/recriar todas as Materialized Views (ou após usar --skip-views no complete)
@@ -93,21 +156,31 @@ python etl.py db views create
 python etl.py db views refresh --concurrent
 ```
 
-### Views Disponíveis
+### Views Disponíveis (13)
 
 | View | Descrição |
 |------|-----------|
 | `mv_stats_estado` | Estatísticas por estado |
 | `mv_stats_municipio` | Estatísticas por município |
 | `mv_stats_cnae` | Estatísticas por CNAE |
-| `mv_stats_cnae_estado` | Estatísticas CNAE x Estado |
+| `mv_stats_cnae_estado` | Estatísticas CNAE × estado |
 | `mv_abertura_periodo` | Aberturas por período |
 | `mv_top_cnaes_cidade` | Top CNAEs por cidade |
-| `mv_stats_natureza_juridica_estado` | Estatísticas por natureza jurídica x estado |
-| `mv_stats_natureza_juridica_municipio` | Estatísticas por natureza jurídica x município |
+| `mv_stats_cidade_situacao` | Estatísticas por cidade × situação cadastral |
+| `mv_regime_tributario_cidade` | Regime tributário por cidade |
+| `mv_porte_cidade` | Porte de empresa por cidade |
+| `mv_stats_natureza_juridica_estado` | Natureza jurídica × estado |
+| `mv_stats_natureza_juridica_municipio` | Natureza jurídica × município |
 | `mv_stats_natureza_juridica` | Estatísticas por natureza jurídica |
+| `mv_stats_natureza_juridica_cnae` | Natureza jurídica × CNAE |
 
-Os scripts SQL estão em `sql/materialized_views/` e são executados na ordem alfabética pelo CLI.
+Os scripts SQL estão em `sql/materialized_views/` e são executados na ordem
+alfabética pelo CLI. A função `refresh_all_mvs()` (arquivo `99_refresh_function.sql`)
+permite atualizar tudo direto no banco.
+
+> **Atenção**: `db init` e `db load` recriam o schema com `DROP TABLE ... CASCADE`,
+> o que **destrói as Materialized Views e a tabela de busca** — elas são recriadas
+> nas etapas finais do `complete`. Detalhes em [Banco de Dados](database.md).
 
 ---
 
@@ -117,24 +190,22 @@ Na pasta `sql/` estão disponíveis **scripts auxiliares** para otimizações av
 automaticamente** pelo ETL e devem ser aplicados manualmente conforme a necessidade do seu ambiente.
 
 > **Nota:** Todos os índices (básicos e avançados como GIN, BRIN, HASH) já são criados automaticamente
-> pelo comando `db index`. Os scripts abaixo oferecem otimizações adicionais para cenários específicos.
-
-### Quando Utilizar
-
-Execute esses scripts **após a conclusão do ETL** (após `db fk` ou `complete`), quando:
-- Necessitar de funções de manutenção e validação
+> pelo comando `db index` (e pelo `db load`/`complete` sem `--skip-index`). Os scripts abaixo oferecem
+> otimizações adicionais para cenários específicos.
 
 ### Scripts Disponíveis
 
-| Arquivo | Propósito | Pré-requisitos |
-|---------|-----------|----------------|
+| Arquivo | Propósito | Observações |
+|---------|-----------|-------------|
 | `general_improvements.sql` | Extensões PostgreSQL, funções de manutenção, validações e configurações de performance | Permissões de superusuário para algumas operações |
+| `prod_hygiene.sql` | Higiene de índices em produção (remoções documentadas em [index_cleanup](index_cleanup.md)) | Aplicar com critério, seguindo o protocolo do documento |
+| `sitemap_indexes.sql` | Índices para geração de sitemaps | **Redundante** desde que os 3 índices foram incorporados a `advanced_indexes.py`; mantido apenas para referência |
 
 ### Como Executar
 
 ```bash
 # Conectar ao banco e executar (substitua as credenciais)
-psql -h localhost -U seu_usuario -d cnpj_rfb -f sql/general_improvements.sql
+psql -h localhost -U postgres -d dados_cnpj -f sql/general_improvements.sql
 ```
 
 ### Detalhes

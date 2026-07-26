@@ -11,7 +11,7 @@ docker compose run --rm etl <comando> [opções]
 
 # Execução via Docker em segundo plano (comandos longos, como `complete`)
 docker compose run -d --name cnpj-run etl <comando> [opções]
-tail -f data/logs/etl-$(date +%F).log
+tail -f data/logs/etl-$(date -u +%F).log   # container roda em UTC
 ```
 
 | Comando | Descrição |
@@ -23,10 +23,12 @@ tail -f data/logs/etl-$(date +%F).log
 | `db init` | Cria schema e tabelas no banco |
 | `db load` | Carrega dados dos arquivos ZIP |
 | `db patch` | Aplica correções estáticas na base |
+| `db logged` | Converte tabelas UNLOGGED para LOGGED (durabilidade) |
 | `db pk` | Adiciona chaves primárias |
 | `db index` | Cria todos os índices (básicos + avançados) |
 | `db fk` | Cria chaves estrangeiras |
 | `db search` | Constrói/reconstrói a tabela de busca `busca_estabelecimento` (build-and-swap) |
+| `db dead-letter` | Lista/reprocessa lotes de COPY preservados após falha na carga |
 | `db views create` | Cria/recria Materialized Views |
 | `db views refresh` | Atualiza dados das Materialized Views |
 | `complete` | Executa todo o pipeline (download + carga + views) |
@@ -54,7 +56,9 @@ Estas opções funcionam com **todos** os comandos.
 
 ## Opções de Observabilidade
 
-Disponíveis em `download`, `complete` e em **todos** os subcomandos `db`.
+Disponíveis em `download`, `complete` e nos subcomandos `db` — **exceto
+`db views refresh`**, que é manutenção recorrente, não abre estado nem registra
+execução (passar estas flags a ele resulta em erro de argumento).
 Guia completo: [Observabilidade e retomada](observabilidade.md).
 
 | Flag | Tipo | Padrão | Descrição |
@@ -155,8 +159,8 @@ Carrega os dados dos arquivos ZIP para o banco de dados.
 | `--skip-index` | flag | - | Não cria índices ao final |
 | `--skip-validation` | flag | - | Ignora verificação dos arquivos |
 | `--low-memory` | flag | - | Ativa garbage collection frequente |
-| `--parallel` | flag | - | Usa multi-threading na carga |
-| `--only-data` | flag | - | Carrega apenas dados (sem patch/pk/index/fk) |
+| `--parallel` | `true\|false` | `true` | Multi-threading na carga (`--parallel false` desliga) |
+| `--only-data` | flag | - | Carrega apenas dados (sem patch/logged/pk/index/fk/search) |
 
 ```bash
 # Carga completa padrão (inclui todos os índices)
@@ -165,13 +169,23 @@ python etl.py db load --month 07/2026
 # Carga apenas dados (sem extras)
 python etl.py db load --month 07/2026 --only-data
 
-# Carga com paralelismo
-python etl.py db load --month 07/2026 --parallel
+# Carga sem paralelismo (o padrão já é paralelo)
+python etl.py db load --month 07/2026 --parallel false
 ```
+
+**Lote defeituoso não derruba a carga.** Um lote de COPY que falha é retentado
+(com reconexão); se falhar definitivamente — o que costuma ser dado malformado
+vindo do próprio arquivo da RFB — as linhas são **isoladas** em
+`data/logs/dead_letter/` (CSV + `.meta` com tabela/colunas/arquivo de origem),
+a contagem de inseridos **não** inclui o lote perdido, e a perda fica
+**documentada** no log (aviso destacado), no metadata da etapa `data_load` no
+JSON de estado e no dashboard (nota âmbar na etapa). O pipeline **segue
+normalmente** — um lote fora do nosso controle não pode condenar uma carga de
+horas. Para fechar o ciclo, use [`db dead-letter`](#comando-db-dead-letter).
 
 ---
 
-## Comandos `db patch`, `db pk`, `db index`, `db fk`
+## Comandos `db patch`, `db logged`, `db pk`, `db index`, `db fk`
 
 Executam etapas específicas do processo de carga.
 
@@ -181,19 +195,43 @@ Executam etapas específicas do processo de carga.
 
 ```bash
 python etl.py db patch    # Aplica correções estáticas
+python etl.py db logged   # Converte tabelas UNLOGGED para LOGGED (durabilidade)
 python etl.py db pk       # Adiciona chaves primárias
 python etl.py db index    # Cria todos os índices (básicos + avançados)
 python etl.py db fk       # Cria chaves estrangeiras
 ```
 
+O comando `db patch` executa, em ordem: inserção de dados de referência
+faltantes (países, qualificações, motivos), normalizações (`LPAD` de
+`cod_pais`, `cod_porte` vazio → `'00'`), a **absorção automática de códigos de
+país órfãos** (códigos presentes em `estabelecimento`/`socio` mas ausentes do
+arquivo PAISCSV do mês entram na tabela `pais` como `CODIGO NAO CONSTANTE NA
+TABELA RFB` — sem isso as FKs de país falhariam, o modo de falha do incidente
+de 07/2026), deduplicação de `empresa` e `VACUUM ANALYZE`.
+
+O comando `db logged` converte as tabelas de UNLOGGED para LOGGED em ordem
+topológica de FK (menor→maior dentro de cada nível). Sem essa etapa, um crash
+da instância **truncaria** as tabelas. Custo: reescrita completa com WAL
+(+1–3 h nas 5 tabelas grandes).
+
 O comando `db index` cria automaticamente:
-- **Índices básicos**: BTREE simples para JOINs, FKs e consultas comuns (~25 índices)
-- **Índices avançados** (~29 índices):
-  - **GIN (pg_trgm)**: Busca textual com `LIKE '%termo%'` em nome fantasia, razão social e nome de sócios
+- **Índices básicos**: BTREE simples para JOINs, FKs e consultas comuns (19 índices)
+- **Índices avançados** (40 índices):
+  - **GIN (pg_trgm)**: Busca textual com `LIKE '%termo%'` em nome fantasia, razão social, bairro e nome de sócios
   - **BRIN**: Índices compactos para colunas de data (economia de ~95% de espaço)
-  - **HASH**: Lookups ultra-rápidos para CNPJ e email
+  - **HASH**: Lookups ultra-rápidos para email
   - **Parciais**: Índices apenas para empresas ativas ou com email preenchido
   - **Compostos**: Otimizados para consultas de prospecção, filtros por localização e CNAE
+
+**Performance**: os índices são criados **sem** `CONCURRENTLY` (o banco de
+carga não tem leitores) e em paralelo por índice — `INDEX_MAX_WORKERS`
+conexões, cada uma com `maintenance_work_mem = INDEX_MAINTENANCE_WORK_MEM`
+(ver [Configuração](configuration.md#criação-de-índices)).
+
+**Falhas não passam em silêncio**: tanto `db index` quanto `db fk` tentam criar
+todos os objetos e, se qualquer um falhar, a etapa termina como **FALHA**
+listando o que ficou faltando (antes, erros de FK eram apenas logados e a
+etapa "concluía" — foi assim que duas FKs sumiram sem alarde em 07/2026).
 
 ---
 
@@ -230,6 +268,50 @@ descartados no início, e a troca funciona tanto na primeira execução
 
 ---
 
+## Comando `db dead-letter`
+
+Fecha o ciclo dos **lotes de COPY que falharam definitivamente** durante a
+carga. Cada lote perdido fica preservado no diretório dead-letter
+(`data/logs/dead_letter/`, configurável via `PIPELINE_DEAD_LETTER_DIR`) como
+um par de arquivos:
+
+- `<tabela>-<timestamp>.csv` — o payload exato que o COPY rejeitou
+  (windows-1252, separado por `;`);
+- `<tabela>-<timestamp>.meta` — tabela, colunas, arquivo de origem e número
+  de linhas.
+
+| Flag | Tipo | Padrão | Descrição |
+|------|------|--------|-----------|
+| `--db-name` | `string` | `dados_cnpj` | Nome do banco |
+| `--retry` | flag | - | Tenta recarregar cada lote; os que carregarem vão para `processed/` |
+| `--dir` | `path` | `data/logs/dead_letter` | Diretório dead-letter |
+
+```bash
+# Listar o que está preservado (tabela, linhas, arquivo de origem)
+python etl.py db dead-letter
+
+# Retentar a carga de todos os lotes (causas transitórias)
+python etl.py db dead-letter --retry
+
+# Intervenção manual: edite o CSV (ex.: corrija a linha malformada da RFB)
+# e reprocesse — só os lotes corrigidos carregam; os demais permanecem
+vim data/logs/dead_letter/cnae-20260726T120000.csv
+python etl.py db dead-letter --retry
+```
+
+Comportamento:
+- cada lote é **uma transação**: ou entra inteiro, ou nada entra;
+- lote carregado com sucesso é movido para `processed/` (trilha de auditoria
+  preservada, sem risco de recarga dupla);
+- lote que ainda falha permanece no lugar, com o erro no log, e o comando
+  termina com **exit code 1** — dá para automatizar o retry em cron e ser
+  alertado só quando sobrar algo que exige intervenção manual.
+
+Assim como `db views refresh`, é um comando de manutenção: não abre estado nem
+registra execução em `pipeline_stats`.
+
+---
+
 ## Comandos `db views create` e `db views refresh`
 
 Comandos **opcionais** para criação e atualização de Materialized Views (MVs).
@@ -262,9 +344,13 @@ python etl.py db views refresh --concurrent
 | `mv_stats_cnae_estado` | Estatísticas detalhadas CNAE x Estado | ~10 min |
 | `mv_abertura_periodo` | Aberturas por mês/estado (desde 2000) | ~8 min |
 | `mv_top_cnaes_cidade` | Top 20 CNAEs por cidade | ~15 min |
+| `mv_stats_cidade_situacao` | Estatísticas por cidade x situação cadastral | ~8 min |
+| `mv_regime_tributario_cidade` | Regime tributário (Simples/MEI) por cidade | ~8 min |
+| `mv_porte_cidade` | Porte de empresa por cidade | ~6 min |
 | `mv_stats_natureza_juridica_estado` | Estatísticas por natureza jurídica x estado | ~6 min |
 | `mv_stats_natureza_juridica_municipio` | Estatísticas por natureza jurídica x município | ~10 min |
 | `mv_stats_natureza_juridica` | Estatísticas agregadas por natureza jurídica | ~3 min |
+| `mv_stats_natureza_juridica_cnae` | Estatísticas por natureza jurídica x CNAE | ~8 min |
 
 **Arquivos SQL:** Os scripts estão em `sql/materialized_views/` e são executados na ordem alfabética.
 
@@ -284,15 +370,20 @@ Executa o pipeline completo: **download + carga + Materialized Views** em sequê
 |------|------|--------|-----------|
 | `--month` | `MM/AAAA` | Último mês | Mês de referência |
 | `--db-name` | `string` | `dados_cnpj` | Nome do banco |
-| `--download-dir` | `path` | `data/downloads` | Diretório de download |
+| `--download-dir` | `path` | `data/downloads` | Diretório de download (os ZIPs vão para `<dir>/AAAA-MM/`, e a carga lê da mesma subpasta) |
 | `--workers` | `int` | `10` | Downloads simultâneos |
 | `--clean` | flag | - | Remove arquivos antes de baixar |
 | `--skip-index` | flag | - | Não cria índices |
 | `--skip-validation` | flag | - | Ignora verificação dos arquivos |
 | `--low-memory` | flag | - | Ativa garbage collection |
-| `--parallel` | flag | - | Usa multi-threading |
-| `--skip-download` | flag | - | Não baixa os arquivos, executa apenas as etapas do banco |
+| `--parallel` | `true\|false` | `true` | Multi-threading na carga (`--parallel false` desliga) |
+| `--skip-download` | flag | - | Não baixa os arquivos, executa apenas as etapas do banco (**implica `--skip-validation`**) |
 | `--skip-views` | flag | - | Não cria Materialized Views ao final |
+
+> **Nota sobre `--download-dir`**: no `complete`, o valor é a **raiz** de
+> downloads (o pipeline cria/lê a subpasta `AAAA-MM` dentro dele). Já no
+> `db load`, `--download-dir` aponta **diretamente** para a pasta que contém
+> os ZIPs.
 
 ```bash
 # Pipeline completo (inclui índices e Materialized Views)
@@ -306,7 +397,8 @@ python etl.py complete --month 07/2026 --parallel --skip-download
 > deixá-lo preso ao terminal — via Docker com `docker compose run -d --name ...`
 > ([Guia Docker](docker.md#execução-em-segundo-plano-detached)) ou, em execução
 > local com Python, com `nohup python etl.py complete ... &`. Nos dois casos, o
-> acompanhamento é o mesmo: `tail -f data/logs/etl-$(date +%F).log`.
+> acompanhamento é o mesmo: `tail -f data/logs/etl-$(date -u +%F).log`
+> (via Docker o container roda em UTC; em execução local, use `date +%F`).
 
 ---
 
@@ -351,6 +443,19 @@ python etl.py db pk
 python etl.py db index
 python etl.py db fk
 python etl.py db search
+```
+
+---
+
+## Códigos de Saída
+
+O CLI termina com código **≠ 0 em qualquer falha** — inclusive as de validação
+(mês inválido, pasta de arquivos ausente, validação de ZIP reprovada), que são
+logadas em português e encerram com código `1`. Isso permite que cron/CI
+detectem falhas de forma confiável:
+
+```bash
+python etl.py complete --month 07/2026 || notificar-falha.sh
 ```
 
 ---

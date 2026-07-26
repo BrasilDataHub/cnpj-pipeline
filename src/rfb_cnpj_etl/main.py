@@ -2,6 +2,7 @@
 
 import argparse
 import os
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Tuple
@@ -56,80 +57,81 @@ def _resolve_log_file_path(cli_value: str = None) -> str:
     return str(raw_path.with_name(f"{raw_path.name}-{date_str}.log"))
 
 
-def _observabilidade_parser() -> argparse.ArgumentParser:
-    """Flags de estado, dashboard e webhooks, compartilhadas pelos subcomandos.
+def _observability_parser() -> argparse.ArgumentParser:
+    """State, dashboard and webhook flags, shared by the subcommands.
 
-    Ficam num parser-pai (`parents=`) para que apareçam depois do subcomando
-    (`etl.py complete --serve`), que é onde se espera encontrá-las.
+    They live in a parent parser (`parents=`) so they appear after the
+    subcommand (`etl.py complete --serve`), which is where users expect them.
     """
     p = argparse.ArgumentParser(add_help=False)
-    grupo = p.add_argument_group("observabilidade")
-    grupo.add_argument(
+    group = p.add_argument_group("observabilidade")
+    group.add_argument(
         "--force", "--force-restart", dest="force", action="store_true",
         help="Ignora o estado existente do período e reexecuta tudo do zero "
              "(o estado anterior é preservado como .bak-<timestamp>)"
     )
-    grupo.add_argument(
+    group.add_argument(
         "--no-state", action="store_true",
         help="Desliga o checkpoint/retomada (não lê nem grava arquivo de estado)"
     )
-    grupo.add_argument(
+    group.add_argument(
         "--reference-period", type=str,
         help="Período dos dados a que esta execução pertence (AAAA-MM ou MM/AAAA). "
              "Só é necessário em subcomandos sem --month (ex.: db init, db fk); "
              "sem ele, usa-se o estado mais recente"
     )
-    grupo.add_argument(
+    group.add_argument(
         "--max-attempts", type=int, default=MAX_STEP_ATTEMPTS,
         help=f"Tentativas por etapa antes de exigir intervenção "
              f"(padrão: {MAX_STEP_ATTEMPTS}; 0 = ilimitado)"
     )
-    grupo.add_argument(
+    group.add_argument(
         "--serve", action="store_true",
         help="Sobe o dashboard web somente leitura durante a execução"
     )
-    grupo.add_argument(
+    group.add_argument(
         "--port", type=int, default=DASHBOARD_DEFAULT_PORT,
         help=f"Porta do dashboard (padrão: {DASHBOARD_DEFAULT_PORT})"
     )
-    grupo.add_argument(
+    group.add_argument(
         "--host", type=str, default="127.0.0.1",
         help="Interface do dashboard (padrão: 127.0.0.1; use 0.0.0.0 em container)"
     )
-    grupo.add_argument(
+    group.add_argument(
         "--dashboard-password", type=str, default=DASHBOARD_PASSWORD,
         help="Senha do dashboard (Basic Auth). Se omitida, uma é gerada e "
              "mostrada no log. Equivale a PIPELINE_DASHBOARD_PASSWORD"
     )
-    grupo.add_argument(
+    group.add_argument(
         "--dashboard-user", type=str, default=DASHBOARD_USER,
         help=f"Usuário do dashboard (padrão: {DASHBOARD_USER})"
     )
-    grupo.add_argument(
+    group.add_argument(
         "--no-auth", action="store_true",
         help="Serve o dashboard sem autenticação (só em rede confiável)"
     )
-    grupo.add_argument(
+    group.add_argument(
         "--webhook-url", type=str,
         help="URL para notificações por etapa (tem prioridade sobre PIPELINE_WEBHOOK_URL)"
     )
     return p
 
 
-def _resolver_mes(args) -> Optional[str]:
-    """Determina o mês de referência ("MM/AAAA") uma única vez.
+def _resolve_month(args) -> Optional[str]:
+    """Resolves the reference month ("MM/YYYY") exactly once.
 
-    Resolver aqui — e não dentro de cada componente — garante que estado,
-    webhooks e download falem do mesmo período, e evita duas consultas à RFB.
+    Resolving here — instead of inside each component — guarantees that
+    state, webhooks and download all talk about the same period, and avoids
+    querying the RFB twice.
     """
-    # --reference-period é a declaração explícita e tem prioridade: existe
-    # justamente para os subcomandos que não têm --month.
-    explicito = getattr(args, "reference_period", None)
-    if explicito:
-        return explicito
-    mes = getattr(args, "month", None)
-    if mes:
-        return mes
+    # --reference-period is the explicit declaration and takes priority: it
+    # exists precisely for the subcommands that have no --month.
+    explicit_period = getattr(args, "reference_period", None)
+    if explicit_period:
+        return explicit_period
+    month = getattr(args, "month", None)
+    if month:
+        return month
     if args.command in ("complete", "download"):
         try:
             return CNPJDataScraper().get_latest()
@@ -138,17 +140,17 @@ def _resolver_mes(args) -> Optional[str]:
     return None
 
 
-def _config_banco(db_name: Optional[str]) -> dict:
-    """Configuração de conexão do banco alvo desta execução."""
+def _db_config(db_name: Optional[str]) -> dict:
+    """Connection configuration for this run's target database."""
     config = POSTGRES.copy()
     if db_name:
         config["database"] = db_name
     return config
 
 
-def _iniciar_observabilidade(args, mes: Optional[str],
-                             db_name: Optional[str] = None) -> Tuple[Optional[RunState], object]:
-    """Prepara estado, webhooks e dashboard. Retorna (state, servidor_dashboard)."""
+def _init_observability(args, month: Optional[str],
+                        db_name: Optional[str] = None) -> Tuple[Optional[RunState], object]:
+    """Prepares state, webhooks and dashboard. Returns (state, dashboard_server)."""
     notifier = WebhookNotifier.from_config(getattr(args, "webhook_url", None))
 
     if getattr(args, "no_state", False):
@@ -156,8 +158,8 @@ def _iniciar_observabilidade(args, mes: Optional[str],
             print_log("--serve IGNORADO: --no-state DESLIGA O ARQUIVO DE ESTADO", level="warning")
         return None, None
 
-    periodo = normalize_reference_period(mes) or RunState.latest_period()
-    if not periodo:
+    period = normalize_reference_period(month) or RunState.latest_period()
+    if not period:
         print_log(
             "SEM PERÍODO DE REFERÊNCIA CONHECIDO — RASTREAMENTO DE ESTADO DESABILITADO "
             "(informe --month para habilitar)",
@@ -165,34 +167,34 @@ def _iniciar_observabilidade(args, mes: Optional[str],
         )
         return None, None
 
-    # O coletor roda ao fim de cada etapa: mostra o banco crescendo durante a
-    # carga em vez de um retrato congelado do início.
-    config_banco = _config_banco(db_name)
+    # The collector runs at the end of each step: it shows the database
+    # growing during the load instead of a frozen snapshot from the start.
+    db_config = _db_config(db_name)
     state = RunState.load_or_create(
-        reference_period=periodo,
+        reference_period=period,
         force=getattr(args, "force", False),
         max_attempts=getattr(args, "max_attempts", MAX_STEP_ATTEMPTS),
         notifier=notifier,
-        db_info_fn=(lambda: collect_database_info(config_banco)) if db_name else None,
+        db_info_fn=(lambda: collect_database_info(db_config)) if db_name else None,
     )
     print_log(f"ESTADO: {state.path}", level="folder")
 
-    ambiente = collect_environment()
-    banco = collect_database_info(config_banco) if db_name else {}
-    state.set_environment(ambiente, banco)
-    if ambiente:
-        onde = ambiente.get("hostname") or "?"
-        ip = ambiente.get("ip")
+    environment = collect_environment()
+    database_info = collect_database_info(db_config) if db_name else {}
+    state.set_environment(environment, database_info)
+    if environment:
+        where = environment.get("hostname") or "?"
+        ip = environment.get("ip")
         print_log(
-            f"AMBIENTE: {ambiente.get('runtime')} em {onde}"
+            f"AMBIENTE: {environment.get('runtime')} em {where}"
             + (f" ({ip})" if ip else "")
-            + f" · Python {ambiente.get('python')} · {ambiente.get('so')}",
+            + f" · Python {environment.get('python')} · {environment.get('os')}",
             level="docs"
         )
 
-    servidor = None
+    server = None
     if getattr(args, "serve", False):
-        servidor = start_dashboard(
+        server = start_dashboard(
             state_path=state.path,
             port=getattr(args, "port", DASHBOARD_DEFAULT_PORT),
             host=getattr(args, "host", "127.0.0.1"),
@@ -202,78 +204,77 @@ def _iniciar_observabilidade(args, mes: Optional[str],
         )
 
     state.pipeline_started()
-    return state, servidor
+    return state, server
 
 
-def _detalhe_downloads(dm: "CNPJDownloadManager") -> list:
-    """Metadados dos arquivos baixados, para `files_downloaded_detail`.
+def _download_details(dm: "CNPJDownloadManager") -> list:
+    """Metadata of the downloaded files, for `files_downloaded_detail`.
 
-    Lê tamanho e mtime do disco: é a única fonte que reflete o que de fato
-    ficou gravado, inclusive quando o download foi retomado de execução
-    anterior.
+    Reads size and mtime from disk: it is the only source that reflects what
+    actually got written, including downloads resumed from a previous run.
     """
-    detalhe = []
-    for caminho, url in zip(dm.file_paths, dm.file_urls):
+    details = []
+    for path, url in zip(dm.file_paths, dm.file_urls):
         try:
-            st = os.stat(caminho)
+            st = os.stat(path)
         except OSError:
             continue
-        detalhe.append({
-            "nome_arquivo": os.path.basename(caminho),
-            "tamanho_bytes": st.st_size,
-            "url_origem": url,
-            "baixado_em": datetime.fromtimestamp(st.st_mtime).astimezone().isoformat(timespec="seconds"),
+        details.append({
+            "filename": os.path.basename(path),
+            "size_bytes": st.st_size,
+            "source_url": url,
+            "downloaded_at": datetime.fromtimestamp(st.st_mtime).astimezone().isoformat(timespec="seconds"),
         })
-    return detalhe
+    return details
 
 
-def _progresso_download(state):
-    """Callback que publica o avanço do download no estado."""
-    def _cb(baixados, total, arquivo):
+def _download_progress(state):
+    """Callback that publishes download progress to the state."""
+    def _cb(downloaded, total, filename):
         if state is None:
             return
         state.progress(
             STEP_DOWNLOAD,
-            arquivos_baixados=int(baixados),
-            arquivos_total=int(total),
-            arquivos_restantes=int(total) - int(baixados),
-            arquivo_atual=os.path.basename(arquivo or ""),
-            percentual=round(baixados / total * 100, 1) if total else None,
+            files_downloaded=int(downloaded),
+            files_total=int(total),
+            files_remaining=int(total) - int(downloaded),
+            current_file=os.path.basename(filename or ""),
+            percent=round(downloaded / total * 100, 1) if total else None,
         )
     return _cb
 
 
-def _resumo_downloads(detalhe: list) -> dict:
-    """Metadados da etapa de download, exibidos no dashboard."""
+def _download_summary(details: list) -> dict:
+    """Download step metadata, displayed on the dashboard."""
     return {
-        "files_downloaded": len(detalhe),
-        "total_bytes": sum(d.get("tamanho_bytes", 0) for d in detalhe),
+        "files_downloaded": len(details),
+        "total_bytes": sum(d.get("size_bytes", 0) for d in details),
     }
 
 
-def _encerrar_dashboard(servidor, args) -> None:
-    """Desliga o dashboard ao fim da execução.
+def _shutdown_dashboard(server, args) -> None:
+    """Shuts the dashboard down at the end of the run.
 
-    Encerra junto com o processo de propósito: manter o servidor no ar
-    travaria execuções em cron. O estado final permanece no JSON, que pode ser
-    reaberto depois com qualquer servidor estático.
+    It dies with the process on purpose: keeping the server up would hang
+    cron runs. The final state remains in the JSON file, which can be served
+    later by any static server.
     """
-    if servidor is None:
+    if server is None:
         return
     try:
-        servidor.shutdown()
-        servidor.server_close()
+        server.shutdown()
+        server.server_close()
     except Exception:
         pass
     print_log("DASHBOARD ENCERRADO (estado final permanece no arquivo JSON)", level="docs")
 
 
-def _registrar_stats_inicio(state: Optional[RunState], db_name: str) -> None:
-    """Grava `started_at` em pipeline_stats. Nunca interrompe o pipeline."""
+def _record_stats_start(state: Optional[RunState], db_name: str) -> None:
+    """Writes `started_at` into pipeline_stats. Never interrupts the pipeline."""
     if state is None:
         return
     from .db import pipeline_stats
-    conn = _conectar_stats(db_name)
+    conn = _stats_connection(db_name)
     if conn is None:
         return
     try:
@@ -286,16 +287,16 @@ def _registrar_stats_inicio(state: Optional[RunState], db_name: str) -> None:
         conn.close()
 
 
-def _registrar_stats_fim(
+def _record_stats_finish(
         state: Optional[RunState], db_name: str, status: str,
         records: Optional[int] = None, downloads: Optional[list] = None,
         error: Optional[str] = None,
 ) -> None:
-    """Fecha a linha de pipeline_stats com os totais. Nunca interrompe."""
+    """Closes the pipeline_stats row with the totals. Never interrupts."""
     if state is None:
         return
     from .db import pipeline_stats
-    conn = _conectar_stats(db_name)
+    conn = _stats_connection(db_name)
     if conn is None:
         return
     try:
@@ -313,8 +314,8 @@ def _registrar_stats_fim(
         conn.close()
 
 
-def _conectar_stats(db_name: str):
-    """Conexão dedicada às estatísticas. Retorna None se o banco não responder."""
+def _stats_connection(db_name: str):
+    """Dedicated statistics connection. Returns None when the database is down."""
     import psycopg2
     config = POSTGRES.copy()
     if db_name:
@@ -326,8 +327,23 @@ def _conectar_stats(db_name: str):
         return None
 
 
+def _complete_files_dir(download_dir: Optional[str], month: Optional[str]) -> Optional[str]:
+    """Resolves the load directory for the `complete` command.
+
+    The download manager always writes into `<download_dir>/<YYYY-MM>/`, so
+    the load must read from the same subfolder. Without this, a custom
+    `--download-dir X` downloaded into `X/2026-07` but tried to load from
+    `X`, failing with "PASTA NÃO ENCONTRADA".
+    """
+    if not download_dir:
+        return None
+    month_ref = month or CNPJDataScraper().get_latest()
+    period = normalize_reference_period(month_ref)   # "YYYY-MM"
+    return os.path.join(download_dir, period)
+
+
 def main() -> None:
-    obs = _observabilidade_parser()
+    obs = _observability_parser()
     parser = argparse.ArgumentParser(
         description="Aplicação para consultar, baixar e carregar dados do CNPJ"
     )
@@ -401,7 +417,19 @@ def main() -> None:
     )
     p_search.add_argument("--db-name", type=str, default=POSTGRES["database"])
 
-    # db-views (subcomando com create e refresh)
+    # db-dead-letter
+    p_dead_letter = db_sub.add_parser(
+        "dead-letter",
+        help="Lista e reprocessa lotes de COPY preservados após falha na carga"
+    )
+    p_dead_letter.add_argument("--db-name", type=str, default=POSTGRES["database"],
+                               help="Nome do banco Postgres")
+    p_dead_letter.add_argument("--retry", action="store_true",
+                               help="Tenta recarregar cada lote; os que carregarem vão para processed/")
+    p_dead_letter.add_argument("--dir", type=str,
+                               help="Diretório dead-letter (padrão: PIPELINE_DEAD_LETTER_DIR)")
+
+    # db-views (subcommand with create and refresh)
     views_cmd = db_sub.add_parser("views", help="Comandos para Materialized Views")
     views_sub = views_cmd.add_subparsers(dest="views_command", required=True)
 
@@ -425,7 +453,8 @@ def main() -> None:
     p_complete.add_argument("--skip-index", action="store_true")
     p_complete.add_argument("--skip-validation", action="store_true")
     p_complete.add_argument("--low-memory", action="store_true")
-    p_complete.add_argument("--parallel", action="store_true")
+    p_complete.add_argument("--parallel", type=str2bool, nargs="?", const=True,
+                            default=DEFAULT_PARALLEL, help="Multithread para Postgres (True/False)")
     p_complete.add_argument("--clean", action="store_true")
     p_complete.add_argument("--workers", type=int)
     p_complete.add_argument("--skip-download", action="store_true",
@@ -440,7 +469,7 @@ def main() -> None:
 
         if args.command == "get-availables":
             data = CNPJDataScraper()
-            print_log(data.get_availabes(), level="docs", time=False)
+            print_log(data.get_availables(), level="docs", time=False)
 
         elif args.command == "get-latest":
             data = CNPJDataScraper()
@@ -453,19 +482,19 @@ def main() -> None:
                 print_log(info["file_url"], level="web", time=False)
 
         elif args.command == "download":
-            mes = _resolver_mes(args)
-            state, servidor = _iniciar_observabilidade(args, mes)
+            month = _resolve_month(args)
+            state, server = _init_observability(args, month)
             try:
                 dm = CNPJDownloadManager(
-                    month_year=mes,
+                    month_year=month,
                     concurrents=args.workers,
                     clean=args.clean,
                     download_dir=args.download_dir,
                 )
                 run_step(
                     state, STEP_DOWNLOAD,
-                    lambda: dm.start_download_queue(on_progress=_progresso_download(state)),
-                    metadata_fn=lambda _: _resumo_downloads(_detalhe_downloads(dm))
+                    lambda: dm.start_download_queue(on_progress=_download_progress(state)),
+                    metadata_fn=lambda _: _download_summary(_download_details(dm))
                 )
             except BaseException as exc:
                 if state:
@@ -475,30 +504,43 @@ def main() -> None:
                 if state:
                     state.pipeline_finished()
             finally:
-                _encerrar_dashboard(servidor, args)
+                _shutdown_dashboard(server, args)
 
         elif args.command == "db":
-            # `views refresh` é manutenção recorrente, não etapa de construção:
-            # não abre estado nem registra execução — reexecutá-lo é sempre
-            # válido e não há nada a retomar.
-            eh_refresh = (args.db_command == "views"
+            # `dead-letter` is maintenance over parked batches: no state, no
+            # stats, no orchestrator — list or re-attempt the COPYs and leave.
+            if args.db_command == "dead-letter":
+                from .db.dead_letter import retry_dead_letters, show_dead_letters
+                if args.retry:
+                    result = retry_dead_letters(_db_config(args.db_name),
+                                                dead_letter_dir=args.dir)
+                    if result["failed"]:
+                        sys.exit(1)
+                else:
+                    show_dead_letters(dead_letter_dir=args.dir)
+                return
+
+            # `views refresh` is recurring maintenance, not a build step: it
+            # opens no state and records no run — re-running it is always
+            # valid and there is nothing to resume.
+            is_refresh = (args.db_command == "views"
                           and getattr(args, "views_command", None) == "refresh")
-            mes = None if eh_refresh else _resolver_mes(args)
+            month = None if is_refresh else _resolve_month(args)
             db_name = args.db_name
-            state, servidor = (None, None) if eh_refresh else _iniciar_observabilidade(args, mes, db_name)
-            _registrar_stats_inicio(state, db_name)
-            registros = None
+            state, server = (None, None) if is_refresh else _init_observability(args, month, db_name)
+            _record_stats_start(state, db_name)
+            records = None
             try:
-                # Comando de views (subcomando próprio)
+                # Views command (own subcommand).
                 if args.db_command == "views":
-                    metricas = run_orchestrator(
+                    metrics = run_orchestrator(
                         command=f"views-{args.views_command}",
                         db_name=db_name,
                         concurrent=getattr(args, "concurrent", False),
                         state=state if args.views_command == "create" else None,
                     )
                 else:
-                    metricas = run_orchestrator(
+                    metrics = run_orchestrator(
                         command=args.db_command,
                         db_name=db_name,
                         month_year=getattr(args, "month", None),
@@ -510,53 +552,57 @@ def main() -> None:
                         only_data=getattr(args, "only_data", False),
                         state=state,
                     )
-                registros = (metricas or {}).get("records_inserted")
+                records = (metrics or {}).get("records_inserted")
             except BaseException as exc:
                 if state:
                     state.pipeline_failed(exc)
-                _registrar_stats_fim(state, db_name, "failed", records=registros, error=str(exc))
+                _record_stats_finish(state, db_name, "failed", records=records, error=str(exc))
                 raise
             else:
                 if state:
                     state.pipeline_finished()
-                _registrar_stats_fim(state, db_name, "completed", records=registros)
+                _record_stats_finish(state, db_name, "completed", records=records)
             finally:
-                _encerrar_dashboard(servidor, args)
+                _shutdown_dashboard(server, args)
 
         elif args.command == "complete":
-            mes = _resolver_mes(args)
+            month = _resolve_month(args)
             db_name = args.db_name
-            state, servidor = _iniciar_observabilidade(args, mes, db_name)
-            _registrar_stats_inicio(state, db_name)
-            registros = None
+            state, server = _init_observability(args, month, db_name)
+            _record_stats_start(state, db_name)
+            records = None
             downloads = None
             try:
                 if not args.skip_download:
                     dm = CNPJDownloadManager(
-                        month_year=mes,
+                        month_year=month,
                         concurrents=args.workers,
                         clean=args.clean,
                         download_dir=args.download_dir,
                     )
                     run_step(
                         state, STEP_DOWNLOAD,
-                        lambda: dm.start_download_queue(on_progress=_progresso_download(state)),
-                        metadata_fn=lambda _: _resumo_downloads(_detalhe_downloads(dm))
+                        lambda: dm.start_download_queue(on_progress=_download_progress(state)),
+                        metadata_fn=lambda _: _download_summary(_download_details(dm))
                     )
-                    downloads = _detalhe_downloads(dm)
+                    downloads = _download_details(dm)
+                    if month is None:
+                        # Keep state, orchestrator and files_dir on the exact
+                        # month the download manager resolved.
+                        month = dm.month_year
 
-                metricas = run_orchestrator(
+                metrics = run_orchestrator(
                     command="load",
                     db_name=db_name,
-                    month_year=mes,
-                    files_dir=getattr(args, "download_dir", None),
+                    month_year=month,
+                    files_dir=_complete_files_dir(getattr(args, "download_dir", None), month),
                     skip_indexes=getattr(args, "skip_index", False),
                     skip_validation=args.skip_download or getattr(args, "skip_validation", False),
                     low_memory=getattr(args, "low_memory", DEFAULT_LOW_MEMORY),
                     parallel=args.parallel,
                     state=state,
                 )
-                registros = (metricas or {}).get("records_inserted")
+                records = (metrics or {}).get("records_inserted")
 
                 if not args.skip_views:
                     run_orchestrator(
@@ -567,19 +613,22 @@ def main() -> None:
             except BaseException as exc:
                 if state:
                     state.pipeline_failed(exc)
-                _registrar_stats_fim(state, db_name, "failed", records=registros,
+                _record_stats_finish(state, db_name, "failed", records=records,
                                      downloads=downloads, error=str(exc))
                 raise
             else:
                 if state:
                     state.pipeline_finished()
-                _registrar_stats_fim(state, db_name, "completed", records=registros,
+                _record_stats_finish(state, db_name, "completed", records=records,
                                      downloads=downloads)
             finally:
-                _encerrar_dashboard(servidor, args)
+                _shutdown_dashboard(server, args)
 
     except ValueError as e:
+        # Validation-style failures (bad period, folder missing, ZIP validation)
+        # must be visible to cron/CI: log in Portuguese, exit nonzero.
         print_log(str(e), level="error", time=False)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -1,12 +1,12 @@
 # cnpj_data/cnpj_public_data.py
 
 """
-Módulo para acessar os dados de CNPJ disponíveis no servidor WebDAV da Receita Federal (Nextcloud).
+Module for accessing the CNPJ data available on the Receita Federal WebDAV server (Nextcloud).
 
-A Receita Federal migrou seus arquivos para um servidor WebDAV (Nextcloud), tornando
-necessário utilizar PROPFIND para listar diretórios e GET para download de arquivos.
+The Receita Federal migrated its files to a WebDAV server (Nextcloud), which makes it
+necessary to use PROPFIND to list directories and GET to download files.
 
-A URL base é configurável via variável de ambiente RFB_WEBDAV_URL.
+The base URL is configurable through the RFB_WEBDAV_URL environment variable.
 """
 
 import os
@@ -17,10 +17,10 @@ from urllib.parse import unquote
 from typing import Dict, List, Tuple, Optional
 from ..config import CNPJ_WEBDAV_BASE_URL
 
-# Namespace DAV para parsing XML
+# DAV namespace for XML parsing
 _DAV_NS = {'d': 'DAV:'}
 
-# Body mínimo para PROPFIND — solicita nome, tamanho e tipo de recurso
+# Minimal body for PROPFIND — requests name, size and resource type
 _PROPFIND_BODY = (
     '<?xml version="1.0" encoding="UTF-8"?>'
     '<d:propfind xmlns:d="DAV:">'
@@ -35,14 +35,14 @@ _PROPFIND_BODY = (
 
 class CNPJDataScraper:
     """
-    Classe para acessar os dados de CNPJ disponíveis no servidor WebDAV da Receita Federal.
+    Class for accessing the CNPJ data available on the Receita Federal WebDAV server.
 
-    Utiliza PROPFIND para listar diretórios e arquivos. O download é feito
-    via GET padrão HTTP (compatível com WebDAV).
+    Uses PROPFIND to list directories and files. The download is done through a
+    standard HTTP GET (WebDAV compatible).
 
     :params:
-        webdav_base_url: URL base WebDAV para o diretório CNPJ.
-        _session: sessão HTTP persistente.
+        webdav_base_url: WebDAV base URL for the CNPJ directory.
+        _session: persistent HTTP session.
     """
 
     def __init__(self):
@@ -52,9 +52,9 @@ class CNPJDataScraper:
     @staticmethod
     def _is_valid_period(month_year: str) -> bool:
         """
-        Verifica se uma string está no formato MM/AAAA.
+        Checks whether a string is in the MM/AAAA format.
 
-        :param month_year: string no formato MM/AAAA
+        :param month_year: string in the MM/AAAA format
         :return: bool
         """
         match = re.match(r'^(\d{2})/(\d{4})$', month_year)
@@ -63,10 +63,10 @@ class CNPJDataScraper:
     @staticmethod
     def _parse_month(month_year: str) -> Tuple[int, int]:
         """
-        Converte uma string no formato AAAA-MM em um par (ano, mês).
+        Converts a string in the AAAA-MM format into a (year, month) pair.
 
-        :param month_year: string no formato AAAA-MM
-        :return: par (ano, mês)
+        :param month_year: string in the AAAA-MM format
+        :return: (year, month) pair
         """
         year_month = month_year.rstrip('/')
         try:
@@ -77,11 +77,11 @@ class CNPJDataScraper:
 
     def _propfind(self, url: str, depth: int = 1) -> List[Dict]:
         """
-        Executa uma requisição WebDAV PROPFIND e retorna as entradas parseadas.
+        Runs a WebDAV PROPFIND request and returns the parsed entries.
 
-        :param url: URL do recurso WebDAV
-        :param depth: profundidade da listagem (0=self, 1=filhos imediatos)
-        :return: Lista de dicionários com informações de cada entrada
+        :param url: URL of the WebDAV resource
+        :param depth: listing depth (0=self, 1=immediate children)
+        :return: List of dictionaries with information about each entry
         """
         headers = {
             'Depth': str(depth),
@@ -125,10 +125,10 @@ class CNPJDataScraper:
     @staticmethod
     def _parse_multistatus(content: bytes) -> List[Dict]:
         """
-        Parseia a resposta XML multi-status do PROPFIND.
+        Parses the multi-status XML response of the PROPFIND.
 
-        :param content: conteúdo XML da resposta
-        :return: lista de entradas com href, name, is_collection, size
+        :param content: XML content of the response
+        :return: list of entries with href, name, is_collection, size
         """
         try:
             root = ET.fromstring(content)
@@ -143,7 +143,7 @@ class CNPJDataScraper:
 
             href = unquote(href_el.text)
 
-            # Procura propstat com status 200
+            # Looks for a propstat with status 200
             prop = None
             for propstat in response.findall('d:propstat', _DAV_NS):
                 status_el = propstat.find('d:status', _DAV_NS)
@@ -151,7 +151,7 @@ class CNPJDataScraper:
                     prop = propstat.find('d:prop', _DAV_NS)
                     break
 
-            # Fallback: primeiro propstat disponível
+            # Fallback: first available propstat
             if prop is None:
                 propstat = response.find('d:propstat', _DAV_NS)
                 if propstat is not None:
@@ -160,14 +160,14 @@ class CNPJDataScraper:
             if prop is None:
                 continue
 
-            # Verifica se é uma coleção (diretório)
+            # Checks whether it is a collection (directory)
             is_collection = False
             resourcetype = prop.find('d:resourcetype', _DAV_NS)
             if resourcetype is not None:
                 if resourcetype.find('d:collection', _DAV_NS) is not None:
                     is_collection = True
 
-            # Tamanho do arquivo
+            # File size
             cl_el = prop.find('d:getcontentlength', _DAV_NS)
             size = 0
             if cl_el is not None and cl_el.text:
@@ -176,13 +176,13 @@ class CNPJDataScraper:
                 except ValueError:
                     size = 0
 
-            # Nome do recurso
+            # Resource name
             dn_el = prop.find('d:displayname', _DAV_NS)
             name = ''
             if dn_el is not None and dn_el.text:
                 name = dn_el.text.strip()
 
-            # Fallback: extrair nome do href
+            # Fallback: extract the name from the href
             if not name:
                 clean_href = href.rstrip('/')
                 name = clean_href.split('/')[-1] if clean_href else ''
@@ -198,9 +198,9 @@ class CNPJDataScraper:
 
     def _available_months(self) -> Dict[str, str]:
         """
-        Obtém os meses disponíveis para download via WebDAV PROPFIND.
+        Gets the months available for download through WebDAV PROPFIND.
 
-        :return: Dicionário {MM/AAAA: AAAA-MM} ordenado decrescente.
+        :return: Dictionary {MM/AAAA: AAAA-MM} sorted in descending order.
         """
         entries = self._propfind(self.webdav_base_url)
 
@@ -211,7 +211,7 @@ class CNPJDataScraper:
             name = entry['name']
             if not name:
                 continue
-            # Valida formato AAAA-MM
+            # Validates the AAAA-MM format
             if re.match(r'^\d{4}-\d{2}$', name):
                 year, month = name.split('-')
                 mm_aaaa = f"{month}/{year}"
@@ -222,7 +222,7 @@ class CNPJDataScraper:
                 f"NENHUM PERÍODO DISPONÍVEL NO SERVIDOR WEBDAV ({self.webdav_base_url})"
             )
 
-        # Ordena os meses em ordem decrescente
+        # Sorts the months in descending order
         sorted_month_years = dict(
             sorted(month_years.items(),
                    key=lambda item: self._parse_month(item[1]),
@@ -231,11 +231,11 @@ class CNPJDataScraper:
 
         return sorted_month_years
 
-    def get_availabes(self):
+    def get_availables(self):
         """
-        Obtém os meses disponíveis para download.
+        Gets the months available for download.
 
-        :return: String com os meses disponíveis.
+        :return: String with the available months.
         """
         month_years = self._available_months()
         availables = ", ".join(month_years.keys())
@@ -243,9 +243,9 @@ class CNPJDataScraper:
 
     def get_latest(self):
         """
-        Obtém o último mês disponível para download.
+        Gets the latest month available for download.
 
-        :return: String com o último mês disponível.
+        :return: String with the latest available month.
         """
         month_years = self._available_months()
         latest = next(iter(month_years.keys()))
@@ -253,34 +253,34 @@ class CNPJDataScraper:
 
     def get_metadata(self, month_year: Optional[str] = None) -> Dict[str, Dict[str, str]]:
         """
-        Obtém as URLs e tamanhos dos arquivos de CNPJ via WebDAV PROPFIND.
+        Gets the URLs and sizes of the CNPJ files through WebDAV PROPFIND.
 
-        Diferente da abordagem anterior (HTML scraping + HEAD por arquivo),
-        esta implementação obtém nome e tamanho em uma única requisição PROPFIND.
+        Unlike the previous approach (HTML scraping + one HEAD per file), this
+        implementation gets name and size in a single PROPFIND request.
 
-        :param month_year: string no formato MM/AAAA
-        :return: Dicionário com metadados dos arquivos de CNPJ disponíveis.
+        :param month_year: string in the MM/AAAA format
+        :return: Dictionary with metadata of the available CNPJ files.
         """
-        # se o mês não foi especificado, usa o mais recente
+        # if the month was not specified, use the most recent one
         if month_year is None:
             month_year = self.get_latest()
 
-        # verifica se o mês é válido
+        # check whether the month is valid
         elif not self._is_valid_period(month_year):
             raise ValueError(f"{month_year} NÃO É UM FORMATO VÁLIDO (MM/AAAA)")
 
-        # verifica se o mês está disponível
+        # check whether the month is available
         month_years_map = self._available_months()
         if month_year not in month_years_map:
             raise ValueError(f"{month_year} NÃO ESTÁ DISPONÍVEL PARA DOWNLOAD")
 
-        folder = month_years_map[month_year]  # obtém o período no formato AAAA-MM
+        folder = month_years_map[month_year]  # gets the period in the AAAA-MM format
         folder_url = f"{self.webdav_base_url}{folder}/"
 
-        # lista os arquivos do mês via PROPFIND
+        # lists the files of the month through PROPFIND
         entries = self._propfind(folder_url)
 
-        # cria um dicionário com os metadados dos arquivos de CNPJ disponíveis
+        # builds a dictionary with the metadata of the available CNPJ files
         result: Dict[str, Dict[str, str]] = {}
         for entry in entries:
             if entry['is_collection']:
@@ -304,6 +304,6 @@ class CNPJDataScraper:
                 f"NENHUM ARQUIVO ZIP ENCONTRADO PARA {month_year} EM {folder_url}"
             )
 
-        # ordena os arquivos por nome
+        # sorts the files by name
         result_sorted = dict(sorted(result.items(), key=lambda item: item[1]["filename"]))
         return result_sorted

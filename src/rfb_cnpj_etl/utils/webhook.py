@@ -1,16 +1,16 @@
 # utils/webhook.py
 
 """
-Notificações HTTP por etapa do pipeline.
+HTTP notifications per pipeline step.
 
-Regra que governa todo este módulo: **uma falha de webhook nunca interrompe o
-pipeline**. O destino pode estar fora do ar, lento ou mal configurado; nada
-disso pode custar uma carga de horas. Por isso: timeout curto, nenhuma
-retentativa e toda exceção capturada e logada.
+The rule that governs this whole module: **a webhook failure never interrupts
+the pipeline**. The destination may be down, slow or misconfigured; none of
+that can cost a load that takes hours. Hence: short timeout, no retries, and
+every exception caught and logged.
 
-Usa `urllib` da biblioteca padrão em vez de `requests` de propósito — o envio
-acontece em pontos críticos e não vale adicionar superfície de dependência
-para um POST de JSON.
+Uses `urllib` from the standard library instead of `requests` on purpose — the
+sending happens at critical points and it is not worth adding dependency
+surface for a JSON POST.
 """
 
 import json
@@ -24,8 +24,8 @@ from .run_state import now_iso
 
 WEBHOOK_TIMEOUT_SECONDS = 5
 
-# Eventos emitidos. Mantidos como constantes porque são contrato público:
-# estão documentados no README e consumidos por terceiros.
+# Emitted events. Kept as constants because they are a public contract: they
+# are documented in the README and consumed by third parties.
 EVENT_PIPELINE_STARTED = "pipeline_started"
 EVENT_STEP_STARTED = "step_started"
 EVENT_STEP_COMPLETED = "step_completed"
@@ -35,25 +35,25 @@ EVENT_PIPELINE_FAILED = "pipeline_failed"
 
 
 class WebhookNotifier:
-    """Envia eventos do pipeline para uma URL, sem jamais propagar erro."""
+    """Sends pipeline events to a URL, without ever propagating an error."""
 
     def __init__(self, url: Optional[str] = None, timeout: int = WEBHOOK_TIMEOUT_SECONDS):
         self.url = url
         self.timeout = timeout
-        self._falhas = 0
+        self._failures = 0
 
     @classmethod
     def from_config(cls, cli_url: Optional[str] = None) -> Optional["WebhookNotifier"]:
-        """Resolve a URL: flag tem prioridade sobre variável de ambiente.
+        """Resolves the URL: the flag takes priority over the environment variable.
 
-        Retorna None quando não há URL — o chamador então não notifica nada,
-        que é o comportamento padrão (webhooks são opt-in).
+        Returns None when there is no URL — the caller then notifies nothing,
+        which is the default behavior (webhooks are opt-in).
         """
         url = cli_url or os.getenv("PIPELINE_WEBHOOK_URL")
         if not url:
             return None
-        origem = "--webhook-url" if cli_url else "PIPELINE_WEBHOOK_URL"
-        print_log(f"WEBHOOKS HABILITADOS VIA {origem}", level="web")
+        source = "--webhook-url" if cli_url else "PIPELINE_WEBHOOK_URL"
+        print_log(f"WEBHOOKS HABILITADOS VIA {source}", level="web")
         return cls(url=url)
 
     def send(
@@ -63,7 +63,7 @@ class WebhookNotifier:
             reference_period: str,
             step: Optional[Dict[str, Any]] = None,
     ) -> bool:
-        """Envia um evento. Retorna True se entregue; False em qualquer falha."""
+        """Sends an event. Returns True if delivered; False on any failure."""
         if not self.url:
             return False
 
@@ -75,8 +75,8 @@ class WebhookNotifier:
         }
 
         if step is not None:
-            # Só os campos do contrato: `metadata` e `attempts` são detalhes
-            # internos do estado e não entram no payload documentado.
+            # Only the contract fields: `metadata` and `attempts` are internal
+            # details of the state and do not go into the documented payload.
             payload["step"] = {
                 "name": step.get("name"),
                 "status": step.get("status"),
@@ -106,20 +106,20 @@ class WebhookNotifier:
                 )
                 return False
         except urllib.error.HTTPError as exc:
-            self._registrar_falha(event, f"HTTP {exc.code}")
+            self._log_failure(event, f"HTTP {exc.code}")
         except urllib.error.URLError as exc:
-            self._registrar_falha(event, f"conexão: {exc.reason}")
-        except Exception as exc:  # timeout, DNS, TLS, payload — nada escapa
-            self._registrar_falha(event, str(exc))
+            self._log_failure(event, f"conexão: {exc.reason}")
+        except Exception as exc:  # timeout, DNS, TLS, payload — nothing escapes
+            self._log_failure(event, str(exc))
         return False
 
-    def _registrar_falha(self, event: str, motivo: str) -> None:
-        self._falhas += 1
-        # Log a cada falha nas primeiras, depois esparso: um destino fora do ar
-        # não pode inundar o log de uma carga de 6 horas.
-        if self._falhas <= 3 or self._falhas % 25 == 0:
+    def _log_failure(self, event: str, reason: str) -> None:
+        self._failures += 1
+        # Log on every failure at first, then sparsely: a destination that is
+        # down must not flood the log of a 6-hour load.
+        if self._failures <= 3 or self._failures % 25 == 0:
             print_log(
-                f"FALHA AO ENVIAR WEBHOOK '{event}' ({motivo}) "
-                f"— pipeline segue normalmente [falha #{self._falhas}]",
+                f"FALHA AO ENVIAR WEBHOOK '{event}' ({reason}) "
+                f"— pipeline segue normalmente [falha #{self._failures}]",
                 level="warning"
             )

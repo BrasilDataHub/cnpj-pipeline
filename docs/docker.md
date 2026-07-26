@@ -150,8 +150,11 @@ terminal, o que também deixa a saída do `docker logs` visualmente poluída.
 - **Um container por vez.** Duas execuções simultâneas do `complete` escrevem
   nas mesmas tabelas e no mesmo diretório de downloads. Confira com
   `docker ps` antes de disparar outra.
-- **Reboot do servidor encerra o job.** Não há retomada automática; reexecute o
-  comando (use `--skip-download` se os ZIPs já estiverem em `data/downloads`).
+- **Reboot do servidor encerra o job.** O container não volta sozinho, mas o
+  progresso **não se perde**: com o volume `./data/state` montado, basta
+  reexecutar o mesmo comando — as etapas já concluídas (inclusive o download,
+  que também retoma por arquivo `.part`) são puladas automaticamente. Ver
+  [Observabilidade — retomada](observabilidade.md).
 
 ## Logs
 
@@ -202,8 +205,8 @@ tzdata) — aí o `tail` com a data local (`date +%F`) volta a bater.
 | Listar todos | `docker ps -a --filter name=cnpj-run` | Inclui os já terminados (`exited`) |
 | Interromper | `docker stop cnpj-run-2026-07` | `SIGTERM` + 10 s até o `SIGKILL`; a carga para onde estiver |
 | Interromper na hora | `docker kill cnpj-run-2026-07` | `SIGKILL` imediato — evite: pode deixar tabelas parcialmente carregadas |
-| Reiniciar | `docker restart cnpj-run-2026-07` | **Reexecuta o comando desde o início** — não há retomada. Para não rebaixar os ZIPs, prefira um comando novo com `--skip-download` |
-| Religar um parado | `docker start -a cnpj-run-2026-07` | Idem: recomeça o mesmo comando do zero |
+| Reiniciar | `docker restart cnpj-run-2026-07` | Reexecuta o mesmo comando; com o volume `./data/state` montado, as etapas já concluídas são **puladas** (retomada) |
+| Religar um parado | `docker start -a cnpj-run-2026-07` | Idem: reexecuta o comando e retoma do checkpoint |
 | Remover | `docker rm cnpj-run-2026-07` | Apaga o container e o `docker logs`; downloads e log em `data/` permanecem |
 | Remover à força | `docker rm -f cnpj-run-2026-07` | Para e remove numa tacada |
 | Ver o comando executado | `docker inspect -f '{{.Path}} {{.Args}}' cnpj-run-2026-07` | Confere o que rodou |
@@ -304,8 +307,10 @@ docker compose run --rm --service-ports etl \
 ```
 
 > ⚠️ Com `--network host`, o `-p` é ignorado e `--host 0.0.0.0` expõe o
-> dashboard em **todas** as interfaces — inclusive a pública. Ele não tem
-> autenticação. Prefira o padrão `127.0.0.1` e um túnel SSH:
+> dashboard em **todas** as interfaces — inclusive a pública. O dashboard tem
+> **Basic Auth por padrão** (sem senha informada, uma é gerada e mostrada no
+> log), mas Basic Auth sem TLS trafega a credencial em claro; em interface
+> pública, prefira o padrão `127.0.0.1` e um túnel SSH:
 > `ssh -N -L 3010:127.0.0.1:3010 root@servidor`.
 
 **Webhook — a URL precisa ser alcançável de dentro do container:**
@@ -380,8 +385,14 @@ compose. O `.env` **não** entra na imagem (é excluído pelo `.dockerignore`).
 | `DOWNLOAD_PATH` | Diretório dos ZIPs baixados (dentro do container) | `/app/data/downloads` |
 | `IBGE_CSV_DIR` | Diretório dos CSVs do IBGE (embutidos na imagem) | `/app/data/locations` |
 | `LOG_FILE` | Arquivo de log — ver [Logs](#logs) | `data/logs/etl-{date}.log` |
+| `PIPELINE_STATE_DIR` | Diretório do estado de execução — **precisa ser volume** para a retomada sobreviver ao container | `/app/data/state` |
 | `RFB_WEBDAV_URL` | URL base WebDAV da Receita Federal (altere se o token mudar) | URL pública atual |
 | `TZ` | Fuso horário do container (afeta log e nome do arquivo) | `UTC` |
+
+A lista completa — incluindo as de observabilidade (`PIPELINE_WEBHOOK_URL`,
+`PIPELINE_PORT`, `PIPELINE_DASHBOARD_*`, `PIPELINE_MAX_ATTEMPTS`) e as de
+criação de índices (`INDEX_MAX_WORKERS`, `INDEX_MAINTENANCE_WORK_MEM`) — está
+em [Configuração](configuration.md#variáveis-de-ambiente).
 
 **Usadas só pelo `docker-compose.yaml`:**
 
@@ -399,6 +410,7 @@ compose. O `.env` **não** entra na imagem (é excluído pelo `.dockerignore`).
 |------|-----------|-----------|
 | `./data/downloads` | `/app/data/downloads` | Arquivos ZIP baixados (~6GB) |
 | `./data/logs` | `/app/data/logs` | Logs do ETL (rotação diária simples) |
+| `./data/state` | `/app/data/state` | **Estado de execução (checkpoint/retomada)** — sem ele, o progresso morre com o container |
 | `./data/locations` | `/app/data/locations` | CSVs do IBGE (somente leitura) |
 
 > O volume `data/locations` é opcional se a imagem já contém os CSVs do IBGE embutidos.
@@ -471,8 +483,9 @@ docker run --rm ghcr.io/brasildatahub/cnpj-pipeline:latest --help
 
 | Sintoma | Causa provável | O que fazer |
 |---|---|---|
-| `Permission denied` no log ou nos downloads | Diretórios do host pertencem ao `root` | `sudo chown -R 1000:1000 data/downloads data/logs` ou rode o `etl-init-permissions` |
-| Falha na carga de localidades (CSVs do IBGE ausentes) | Volume cobrindo `/app/data` inteiro | Monte só as subpastas (`data/downloads`, `data/logs`) |
+| `Permission denied` no log ou nos downloads | Diretórios do host pertencem ao `root` | `sudo chown -R 1000:1000 data/downloads data/logs data/state` ou rode o `etl-init-permissions` |
+| Falha na carga de localidades (CSVs do IBGE ausentes) | Volume cobrindo `/app/data` inteiro | Monte só as subpastas (`data/downloads`, `data/logs`, `data/state`) |
+| Retomada não funciona (recomeça do zero) | Volume `data/state` não montado | Monte `./data/state:/app/data/state` — é onde vive o checkpoint |
 | `could not translate host name "postgres"` | `docker run` fora da rede do compose | Use `--network rfb-cnpj-network`, `--add-host postgres:host-gateway` ou aponte `POSTGRES_HOST` para o IP/DNS real |
 | `Connection refused` no banco | PostgreSQL ainda subindo ou porta não publicada | `docker compose ps` (healthcheck) e `docker compose logs postgres` |
 | Container morre com exit `137` | `docker stop` ou **OOM kill** | `docker inspect -f '{{.State.OOMKilled}}' <nome>`; o serviço `etl` tem limite de 4 GB no compose — ajuste `deploy.resources.limits` |

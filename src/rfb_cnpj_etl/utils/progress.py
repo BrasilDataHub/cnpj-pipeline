@@ -1,7 +1,7 @@
 # utils/progress.py
 
 """
-Barra de progresso.
+Progress bar.
 """
 
 from os.path import basename
@@ -31,25 +31,21 @@ def update_progress(rows_inserted: int,
                     bar=None,
                     accumulated_total: int = None):
     """
-    Atualiza barra de progresso ou imprime log de debug, de forma thread-safe se necessário.
+    Updates the progress bar or prints a debug log, in a thread-safe way if needed.
 
     :params:
-        rows_inserted: Quantidade de linhas inseridas nesse passo
-        filename: Nome do arquivo sendo processado
-        insertion_queue: Fila de inserção
-        queue_size_max: Tamanho máximo da fila
-        total: Total de registros a serem processados
-        debug: Se True, imprime log detalhado em vez de usar barra
-        shared: Dicionário compartilhado entre threads (opcional)
-        lock: Lock para sincronização (opcional)
-        bar: Instância da barra de progresso (opcional)
+        rows_inserted: Number of rows inserted in this step
+        filename: Name of the file being processed
+        insertion_queue: Insertion queue
+        queue_size_max: Maximum queue size
+        total: Total number of records to be processed
+        debug: If True, prints a detailed log instead of using a bar
+        shared: Dictionary shared between threads (optional)
+        lock: Lock for synchronization (optional)
+        bar: Progress bar instance (optional)
     """
-    # --- Se não estiver em modo debug, atualiza a barra e termina ---
-    if not debug and bar:
-        bar.update(rows_inserted)
-        return
-
-    # Calcula o total de registros inseridos até o momento
+    # Always accumulate the inserted total: the run state, the webhook
+    # progress and the loader's return value all read it — even in bar mode.
     if shared is not None and lock is not None:
         with lock:
             shared["inserted_total"] += rows_inserted
@@ -57,31 +53,38 @@ def update_progress(rows_inserted: int,
     elif accumulated_total is not None:
         current_inserted = accumulated_total
     else:
-        return  # Não faz nada se não tiver como calcular o total
+        return  # Does nothing if there is no way to compute the total
 
-    # Calcula o percentual atual
+    # --- Bar mode (default): animate the tqdm bar and finish ---
+    if not debug:
+        bar_instance = bar or (shared or {}).get("bar")
+        if bar_instance is not None:
+            bar_instance.update(rows_inserted)
+        return
+
+    # Compute the current percentage
     current_percent = min(100.0, (current_inserted / total) * 100) if total > 0 else 0
 
-    # Determina o último percentual reportado para o LOG
+    # Determine the last percentage reported to the LOG
     if shared is not None and lock is not None:
-        # Modo multi-thread: pega do dicionário compartilhado
+        # Multi-thread mode: take it from the shared dictionary
         last_log_percent = shared.get("last_log_percent", 0.0)
     else:
-        # Modo single-thread: pega de um atributo da própria função
+        # Single-thread mode: take it from an attribute of the function itself
         if not hasattr(update_progress, 'last_log_percent'):
             update_progress.last_log_percent = 0.0
         last_log_percent = update_progress.last_log_percent
 
-    # --- LÓGICA DE CONTROLE: SÓ IMPRIME O LOG SE AVANÇAR PELO MENOS 1% ---
+    # --- CONTROL LOGIC: ONLY PRINT THE LOG IF IT ADVANCES AT LEAST 1% ---
     if (current_percent - last_log_percent) >= 0.5 or (current_percent == 100.0 and last_log_percent <= 100.0):
-        # Atualiza o estado do último percentual reportado
+        # Update the state of the last reported percentage
         if shared is not None and lock is not None:
             with lock:
                 shared["last_log_percent"] = current_percent
         else:
             update_progress.last_log_percent = current_percent
 
-        # Imprime o log
+        # Print the log
         queue_size = insertion_queue.qsize()
         fname = basename(filename).upper()
         print_log(

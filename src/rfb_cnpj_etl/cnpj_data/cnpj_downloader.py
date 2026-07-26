@@ -1,7 +1,7 @@
 # cnpj_data/cnpj_downloader.py
 
 """
-Módulo para baixar os arquivos de dados de CNPJ disponíveis no site da Receita Federal.
+Downloads the CNPJ data files published by the Receita Federal.
 """
 
 import os
@@ -22,25 +22,26 @@ from ..config import (
 
 class CNPJDownloadTask:
     """
-    Classe para baixar um arquivo de dados de CNPJ disponível no site da Receita Federal.
+    Downloads a single CNPJ data file from the Receita Federal server.
 
     :params:
-        download_url: URL do arquivo a ser baixado.
-        download_dir: diretório onde o arquivo será salvo.
-        session: sessão HTTP persistente.
-        header: cabeçalho HTTP a ser enviado na requisição.
-        clean: Se True, remove arquivos baixados anteriormente. Se None, continua o download.
+        download_url: URL of the file to download.
+        file_path: destination path for the file.
+        session: persistent HTTP session.
+        headers: HTTP headers sent with the request.
+        clean: when True, removes previously downloaded files. Otherwise the
+               download resumes from the partial file.
     """
 
-    # define os tamanhos das colunas da informação de download
+    # Column widths for the download progress bar.
     @classmethod
     def set_bar_width(cls, width: int) -> None:
-        cls.W_DESC = width  # nome do arquivo
-        cls.W_PERC = 5  # percentual executado
-        cls.W_BAR = 15  # barra de progresso
-        cls.W_ETA = 8  # tempo restante
-        cls.W_SIZE = 6  # baixado / tamanho total
-        cls.W_SPEED = 9  # velocidade de download
+        cls.W_DESC = width  # file name
+        cls.W_PERC = 5  # completion percentage
+        cls.W_BAR = 15  # progress bar
+        cls.W_ETA = 8  # time remaining
+        cls.W_SIZE = 6  # downloaded / total size
+        cls.W_SPEED = 9  # download speed
 
     def __init__(
             self,
@@ -51,46 +52,44 @@ class CNPJDownloadTask:
             *,
             clean: bool = False,
     ):
-        self.download_url = download_url  # url do arquivo a ser baixado
-        self.file_path = file_path  # caminho do arquivo a ser salvo
-        self.session = session  # sessão HTTP persistente
-        self.headers = headers  # cabeçalho HTTP a ser enviado na requisição
-        self.clean = clean  # se True, remove arquivos baixados anteriormente
-        self.filename = os.path.basename(self.file_path)  # nome do arquivo
-        self.chunk_size = DOWNLOAD_CHUNK_SIZE  # tamanho do chunk para download
-        self.chunk_timeout = DOWNLOAD_CHUNK_TIMEOUT  # tempo limite para download de um chunk
-        self.max_retries = DOWNLOAD_MAX_RETRIES  # número máximo de tentativas de download
+        self.download_url = download_url
+        self.file_path = file_path
+        self.session = session
+        self.headers = headers
+        self.clean = clean
+        self.filename = os.path.basename(self.file_path)
+        self.chunk_size = DOWNLOAD_CHUNK_SIZE
+        self.chunk_timeout = DOWNLOAD_CHUNK_TIMEOUT
+        self.max_retries = DOWNLOAD_MAX_RETRIES
 
     def start_download_task(self, bar_position: int = 1):
-        # caminho temporário para salvar o arquivo parcialmente baixado
+        # Temporary path for the partially downloaded file.
         temp_path = self.file_path + ".part"
 
-        # cria o diretório do arquivo, se não existir
+        # Create the destination directory if needed.
         os.makedirs(os.path.dirname(self.file_path), exist_ok=True)
 
-        # sempre remove o arquivo parcial
+        # Always remove the partial file from a previous process.
         if os.path.exists(temp_path):
             os.remove(temp_path)
 
-        # se clean = True, remove arquivo parcialmente baixado e o arquivo completo, se existir
+        # With clean=True, also remove the completed file, if any.
         if self.clean and os.path.exists(self.file_path):
             os.remove(self.file_path)
 
-        # tenta baixar o arquivo
         for download_attempt in range(1, self.max_retries + 1):
 
-            # tamanho do arquivo parcialmente baixado, se houver
+            # Size of the partial file, if any (resume point).
             temp_file_size = os.path.getsize(temp_path) if os.path.exists(temp_path) else 0
 
-            # se o arquivo já existe, retorna o caminho existente
+            # File already fully downloaded: return the existing path.
             if os.path.exists(self.file_path):
                 time.sleep(0.5)
                 return self.file_path
 
-            # define o cabeçalho HTTP para o download
             request_headers = self.headers.copy()
 
-            # se o arquivo foi parcialmente baixado, define o cabeçalho HTTP para retomar o download
+            # Partial file present: ask the server to resume from that byte.
             if temp_file_size:
                 request_headers["Range"] = f"bytes={temp_file_size}-"
 
@@ -101,41 +100,40 @@ class CNPJDownloadTask:
                     stream=True,
                     timeout=self.chunk_timeout,
                 )
-                resp.raise_for_status()  # verifica se a requisição foi bem-sucedida
+                resp.raise_for_status()
 
-                # se a resposta da requisição for parcial (content-range), usa o valor do cabeçalho
+                # Partial response (Content-Range): total comes from the header.
                 content_range = resp.headers.get("Content-Range")
                 if content_range:
                     total = int(content_range.split("/")[-1])
-                else:  # senão, soma o que já foi baixado ao tamanho do arquivo parcialmente baixado
+                else:  # otherwise, add what was already downloaded to the remaining length
                     total = int(resp.headers.get("Content-Length", 0)) + temp_file_size
 
-                # se o arquivo já foi baixado por completo, retorna o caminho do arquivo
+                # Partial file already complete: promote it to the final path.
                 if temp_file_size >= total:
                     os.replace(temp_path, self.file_path)
                     time.sleep(0.5)
                     return self.file_path
 
-                # modo de escrita do arquivo
-                # ab = append (continuar), wb = write (novo)
+                # File write mode: ab = append (resume), wb = write (new).
                 mode = "ab" if temp_file_size else "wb"
 
-                # define o formato de exibição do tempo estimado na barra de progresso
+                # ETA display format for the progress bar.
                 tqdm.format_interval = lambda secs: time.strftime('%H:%M:%S', time.gmtime(secs))
 
-                # formatação da barra de progresso
+                # Progress bar layout.
                 desc = f"{self.filename:<{self.W_DESC}}"
                 bar_fmt = (
-                    f"{{desc}} | "  # primeira coluna com o nome do arquivo
-                    f"{{percentage:{self.W_PERC}.1f}}% "  # segunda coluna com o percentual executado
-                    f"{{bar:{self.W_BAR}}} | "  # terceira coluna com a barra de progresso
-                    f"{{remaining:{self.W_ETA}}} | "  # quarta coluna com o tempo estimado
-                    f"{{n_fmt:>{self.W_SIZE}}}{{unit}} de "  # quinta coluna com o tamanho do arquivo
-                    f"{{total_fmt:>{self.W_SIZE}}}{{unit}} | "  # sexta coluna com a velocidade de download 
-                    f"{{rate_fmt:>{self.W_SPEED}}}"  # sétima coluna com a velocidade de download
+                    f"{{desc}} | "
+                    f"{{percentage:{self.W_PERC}.1f}}% "
+                    f"{{bar:{self.W_BAR}}} | "
+                    f"{{remaining:{self.W_ETA}}} | "
+                    f"{{n_fmt:>{self.W_SIZE}}}{{unit}} de "
+                    f"{{total_fmt:>{self.W_SIZE}}}{{unit}} | "
+                    f"{{rate_fmt:>{self.W_SPEED}}}"
                 )
 
-                # espaços ocupados por cada coluna (fixo)
+                # Fixed width consumed by each column.
                 ncols = (
                         self.W_DESC + 3 +
                         self.W_PERC + 2 +
@@ -145,59 +143,61 @@ class CNPJDownloadTask:
                         self.W_SPEED + 11
                 )
 
-                # executa o download com barra de progresso visível
+                # Download with a visible progress bar.
                 with open(temp_path, mode) as f, tqdm(
-                        position=bar_position,  # posição da barra de progresso na lista
-                        leave=False,  # não deixa a barra de progresso visível após o término
-                        total=total,  # tamanho total do arquivo
-                        initial=temp_file_size,  # tamanho do arquivo parcialmente baixado
-                        unit="B",  # unidade de medida do tamanho do arquivo
-                        unit_scale=True,  # escala automática da unidade de medida
-                        unit_divisor=1024,  # divisor da unidade de medida
-                        desc=desc,  # descrição (nome do arquivo)
-                        bar_format=bar_fmt,  # formato da barra de progresso
-                        ncols=ncols,  # tamanho da barra de progresso
-                        ascii=False  # habilita caracteres unicode
+                        position=bar_position,
+                        leave=False,
+                        total=total,
+                        initial=temp_file_size,
+                        unit="B",
+                        unit_scale=True,
+                        unit_divisor=1024,
+                        desc=desc,
+                        bar_format=bar_fmt,
+                        ncols=ncols,
+                        ascii=False
                 ) as pbar:
-                    # itera sobre os chunks do arquivo
                     for chunk in resp.iter_content(chunk_size=self.chunk_size):
-                        f.write(chunk)  # escreve o chunk no arquivo
-                        pbar.update(len(chunk))  # atualiza a barra de progresso
+                        f.write(chunk)
+                        pbar.update(len(chunk))
 
-                # se o arquivo foi baixado por completo, renomeia o arquivo temporário para o arquivo final
+                # Fully downloaded: promote the temp file to the final path.
                 os.replace(temp_path, self.file_path)
 
                 return self.file_path
 
             except requests.HTTPError as e:
-                # se a resposta da requisição for 416 (Range Not Satisfiable)
-                if e.response.status_code == 416:
-                    if os.path.exists(self.file_path):
-                        os.remove(temp_path)  # remove o arquivo temporário
-                    continue  # tenta novamente
+                # 416 (Range Not Satisfiable): our resume offset is invalid for
+                # the server. The partial file is useless — discard it so the
+                # next attempt restarts from scratch instead of looping with
+                # the same bad Range header.
+                if e.response is not None and e.response.status_code == 416:
+                    if os.path.exists(temp_path):
+                        os.remove(temp_path)
+                    continue
 
-                # se ainda há tentativas
                 if download_attempt < self.max_retries:
-                    continue  # tenta novamente
+                    continue
 
             except Exception:
-                # se ainda há tentativas
                 if download_attempt < self.max_retries:
-                    continue  # tenta novamente
+                    continue
 
-        # lança um erro após esgotar o número máximo de tentativas
+        # All attempts exhausted.
         raise RuntimeError(f"❌ {self.filename.upper()} DOWNLOAD INTERROMPIDO APÓS {self.max_retries} TENTATIVAS")
 
 
 class CNPJDownloadManager:
     """
-    Classe para gerenciar o download de arquivos de dados de CNPJ disponíveis no site da Receita Federal.
+    Manages the download queue of CNPJ data files.
 
     :params:
-        month_year: Mês/ano para baixar. Se None, baixa o mais recente.
-        download_dir: Diretório para salvar os arquivos baixados. Se None, usa DOWNLOAD_DIR.
-        concurrents: Número máximo de downloads concorrentes. Se None, usa DOWNLOAD_MAX_CONCURRENTS.
-        clean: Se True, remove arquivos baixados anteriormente. Se None, continua o download.
+        month_year: month/year to download. When None, uses the latest.
+        download_dir: destination directory. When None, uses DOWNLOAD_DIR.
+        concurrents: maximum simultaneous downloads. When None, uses
+                     DOWNLOAD_MAX_CONCURRENTS.
+        clean: when True, removes previously downloaded files. Otherwise the
+               downloads resume.
     """
 
     def __init__(
@@ -208,59 +208,63 @@ class CNPJDownloadManager:
             clean: Optional[bool] = False,
     ):
         print_log(f"INICIANDO DOWNLOAD...", level="start")
-        self.source = CNPJDataScraper()  # objeto para obter dados do período
+        self.source = CNPJDataScraper()
         if not month_year:
-            month_year = self.source.get_latest()  # se não fornecido, obtém o mês mais recente
+            month_year = self.source.get_latest()
         if not download_dir:
-            download_dir = DOWNLOAD_DIR  # se não fornecido, usa DOWNLOAD_DIR
+            download_dir = DOWNLOAD_DIR
         if not concurrents:
-            concurrents = DOWNLOAD_MAX_CONCURRENTS  # se não fornecido, usa DOWNLOAD_MAX_CONCURRENTS
+            concurrents = DOWNLOAD_MAX_CONCURRENTS
 
-
-        self.agents = BROWSER_AGENTS  # lista de agentes de navegador
-        self.session = requests.Session()  # cria uma sessão HTTP persistente
-        self.month_year = month_year  # mês/ano para baixar
-        self.download_dir = os.path.abspath(download_dir  # diretório para salvar os arquivos
+        self.agents = BROWSER_AGENTS
+        self.session = requests.Session()
+        self.month_year = month_year
+        self.download_dir = os.path.abspath(download_dir
                                             or DOWNLOAD_DIR)
-        self.concurrents = concurrents  # número máximo de downloads concorrentes
-        self.clean = clean  # se True, remove arquivos baixados anteriormente
-        self.file_paths = []  # lista de caminhos para os arquivos baixados
-        self.file_urls = []  # lista de URLs para os arquivos
-        self._collect()  # coleta os dados do período informado
-        self.max_desc = max(len(os.path.basename(p))  # largura máxima dentre os nomes dos arquivos
+        self.concurrents = concurrents
+        self.clean = clean
+        self.file_paths = []  # destination paths of the files
+        self.file_urls = []  # source URLs of the files
+        self._collect()  # fetch the metadata for the requested period
+        self.max_desc = max(len(os.path.basename(p))  # widest file name (bar layout)
                             for p in self.file_paths)
 
-    # coletar os dados do períoro informado
     def _collect(self):
-        for rel, info in self.source.get_metadata(self.month_year).items():  # itera sobre os dados do período
-            self.file_paths.append(os.path.join(self.download_dir, rel))  # adiciona o caminho do arquivo
-            self.file_urls.append(info["file_url"])  # adiciona o URL do arquivo
+        """Collects file paths and URLs for the requested period."""
+        for rel, info in self.source.get_metadata(self.month_year).items():
+            self.file_paths.append(os.path.join(self.download_dir, rel))
+            self.file_urls.append(info["file_url"])
 
-    # iniciar os downloads
     def start_download_queue(self, on_progress=None):
-        """Baixa a fila de arquivos.
+        """Downloads the file queue.
 
-        :param on_progress: callback opcional chamado a cada arquivo concluído,
-            com (baixados, total, nome_do_arquivo). Usado pelo estado de
-            execução para publicar progresso no dashboard.
+        Raises RuntimeError when any file fails for good: a "successful"
+        download step with files missing would only push the failure into the
+        validation/load steps (or hide it entirely when validation is
+        skipped). The state marks the step as failed and a resume only
+        re-downloads what is missing.
+
+        :param on_progress: optional callback invoked per completed file with
+            (downloaded_count, total, filename). Used by the run state to
+            publish progress to the dashboard.
         """
-        CNPJDownloadTask.set_bar_width(self.max_desc)  # define a largura da barra de progresso
+        CNPJDownloadTask.set_bar_width(self.max_desc)
 
-        queue_size = len(self.file_urls)  # total de downloads a serem realizados
-        now, elapsed = get_timestamp()  # obtém a hora atual e o tempo decorrido
+        queue_size = len(self.file_urls)
+        now, elapsed = get_timestamp()
         print_log(f"{queue_size} ARQUIVOS DISPONÍVEIS NO SITE DA RECEITA FEDERAL ({self.month_year})", level="web")
         desc = (f"🕑 {now} "
                 f"|⏱️ {elapsed} "
                 f"|📋 {queue_size} ARQUIVOS RESTANTES. BAIXANDO")
         remaining_bar = tqdm(
-            position=0,  # posição da barra de progresso na lista
-            leave=False,  # não deixa a barra de progresso visível após o término
-            total=queue_size,  # tamanho total do arquivo
+            position=0,
+            leave=False,
+            total=queue_size,
             desc=desc,
             bar_format="{desc} "
         )
 
-        # fila para controlar a posição das barras de progresso
+        # Queue that hands out progress-bar positions to worker threads.
         available_queue_positions = PriorityQueue()
         for pos in range(1, self.concurrents + 1):
             available_queue_positions.put(pos)
@@ -272,47 +276,49 @@ class CNPJDownloadManager:
             finally:
                 available_queue_positions.put(queue_position)
 
-        future_task: Dict = {}  # dicionário para armazenar as tarefas em execução
+        future_task: Dict = {}
+        failed_files = []
 
-        # cria um executor de thread
         with ThreadPoolExecutor(max_workers=self.concurrents) as executor:
-            # itera sobre as URLs e caminhos dos arquivos
             for url, file_path in zip(self.file_urls, self.file_paths):
-                # seleciona um agente aleatório
                 headers = {"User-Agent": random.choice(self.agents)}
-                # cria uma tarefa de download
                 task = CNPJDownloadTask(url, file_path, self.session, headers, clean=self.clean)
-                # adiciona a tarefa ao dicionário
                 future_task[executor.submit(create_download_task, task)] = task
 
-            # aguarda todas as tarefas serem concluídas
             for future in as_completed(future_task):
-                task = future_task[future]  # obtém a tarefa associada ao future
+                task = future_task[future]
                 try:
-                    future.result()  # aguarda o término da tarefa
-                    remaining_bar.update(1)  # avança a barra de progresso
-                    now, elapsed = get_timestamp()  # obtém hora atual e tempo decorrido
-                    remaining = remaining_bar.total - remaining_bar.n  # arquivos restantes após update
+                    future.result()
+                    remaining_bar.update(1)
+                    now, elapsed = get_timestamp()
+                    remaining = remaining_bar.total - remaining_bar.n
 
-                    # atualiza a descrição da barra de progresso principal
                     remaining_msg = "ARQUIVOS RESTANTES" if remaining > 1 else "ARQUIVO RESTANTE"
                     desc = (f"🕑 {now} "
                             f"|⏱️ {elapsed} "
                             f"|ℹ️ {remaining} {remaining_msg}. BAIXANDO")
                     remaining_bar.set_description(f"{desc}")
 
-                    remaining_bar.refresh()  # força atualização visual da barra
+                    remaining_bar.refresh()
 
                     if on_progress is not None:
                         try:
                             on_progress(remaining_bar.n, remaining_bar.total, task.filename)
                         except Exception:
-                            pass   # instrumentação nunca interrompe o download
+                            pass   # instrumentation must never interrupt the download
 
                 except Exception as e:
+                    failed_files.append(task.filename)
                     print_log(f"ERRO AO BAIXAR {task.filename}: {e}", level="error")
 
         remaining_bar.clear()
         remaining_bar.close()
+
+        if failed_files:
+            raise RuntimeError(
+                f"DOWNLOAD INCOMPLETO: {len(failed_files)} ARQUIVO(S) FALHARAM: "
+                f"{', '.join(sorted(failed_files))}. "
+                f"Reexecute o comando para retomar apenas o que falta."
+            )
 
         print_log("DOWNLOAD CONCLUÍDO", level="done")

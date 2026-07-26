@@ -1,11 +1,11 @@
 # db/schema.py
 
 """
-Define o schema completo do banco de dados da base CNPJ, incluindo o mapeamento
-dos arquivos de origem para as tabelas de destino.
+Defines the complete database schema for the CNPJ dataset, including the mapping
+from source files to target tables.
 
-Esta estrutura consolidada é a "Fonte da Verdade" e facilita a criação
-programática de tabelas, índices, constraints e a lógica de carga de dados.
+This consolidated structure is the "Source of Truth" and makes it easier to
+programmatically create tables, indexes, constraints and the data loading logic.
 """
 
 SCHEMA = {
@@ -25,8 +25,8 @@ SCHEMA = {
     },
     'municipio_rfb': {
         'source_file_stem': 'Municipios',
-        # NOTA: O arquivo Municipios.zip da RFB possui apenas 2 colunas: cod_municipio e nome_municipio.
-        # A coluna uf NÃO existe no arquivo original.
+        # NOTE: The RFB Municipios.zip file has only 2 columns: cod_municipio and nome_municipio.
+        # The uf column does NOT exist in the original file.
         'columns': [
             ('cod_municipio', 'VARCHAR(7) PRIMARY KEY'),
             ('nome_municipio', 'VARCHAR(120) NOT NULL')
@@ -121,10 +121,10 @@ SCHEMA = {
         ],
         'indexes': [
             {'name': 'idx_empresa_cnpj', 'columns': ['cnpj_basico']},
-            # idx_empresa_razao_social (3,7 GB): remoção CONDICIONAL — o
-            # website ainda ordena por razao_social (sort=corporate_name);
-            # só remover quando nenhum ORDER BY razao_social sobreviver
-            # (pós-AG14). Ver docs/index_cleanup.md.
+            # idx_empresa_razao_social (3.7 GB): CONDITIONAL removal — the
+            # website still sorts by razao_social (sort=corporate_name);
+            # only remove it once no ORDER BY razao_social survives
+            # (post-AG14). See docs/index_cleanup.md.
             {'name': 'idx_empresa_razao_social', 'columns': ['razao_social']},
             {'name': 'idx_empresa_natureza', 'columns': ['cod_natureza_juridica']},
             {'name': 'idx_empresa_porte', 'columns': ['cod_porte']}
@@ -136,7 +136,7 @@ SCHEMA = {
             ('cnpj_basico', 'VARCHAR(8) NOT NULL'),
             ('cnpj_ordem', 'VARCHAR(4) NOT NULL'),
             ('cnpj_dv', 'VARCHAR(2) NOT NULL'),
-            ('cnpj_completo', 'CHAR(14) NOT NULL'),  # Computado no Python durante carga
+            ('cnpj_completo', 'CHAR(14) NOT NULL'),  # Computed in Python during load
             ('matriz_filial', 'VARCHAR(1) NOT NULL'),
             ('nome_fantasia', 'VARCHAR(60)'),
             ('cod_situacao_cadastral', 'VARCHAR(2) NOT NULL'),
@@ -168,7 +168,7 @@ SCHEMA = {
             ('cod_estado_ibge', 'INTEGER'),
             ('cod_cidade_ibge', 'INTEGER')
         ],
-        'primary_key': ['cnpj_completo'],  # PK simplificada usando cnpj_completo
+        'primary_key': ['cnpj_completo'],  # Simplified PK using cnpj_completo
         'foreign_keys': [
             {'columns': ['cnpj_basico'], 'references': 'empresa(cnpj_basico)'},
             {'columns': ['cod_cnae_principal'], 'references': 'cnae(cod_cnae)'},
@@ -178,12 +178,12 @@ SCHEMA = {
             {'columns': ['cod_estado_ibge'], 'references': 'ibge_estado(cod_estado_ibge)'},
             {'columns': ['cod_cidade_ibge'], 'references': 'ibge_cidade(cod_cidade_ibge)'}
         ],
-        # Índices redundantes removidos em 2026-07 (AG9, ~3 GB nesta lista):
+        # Redundant indexes removed in 2026-07 (AG9, ~3 GB in this list):
         # idx_estab_cnae_principal, idx_estab_data_inicio, idx_estab_situacao,
-        # idx_estab_regiao_ibge, idx_estab_estado_ibge e idx_estab_cidade_ibge
-        # eram prefixos exatos de índices compostos existentes (ou tinham
-        # seletividade baixa demais para valer 0,5 GB cada). Justificativas e
-        # protocolo de remoção em produção: docs/index_cleanup.md.
+        # idx_estab_regiao_ibge, idx_estab_estado_ibge and idx_estab_cidade_ibge
+        # were exact prefixes of existing composite indexes (or had
+        # selectivity too low to justify 0.5 GB each). Rationale and
+        # removal protocol in production: docs/index_cleanup.md.
         'indexes': [
             {'name': 'idx_estab_empresa', 'columns': ['cnpj_basico']},
             {'name': 'idx_estab_nome_fantasia', 'columns': ['nome_fantasia']},
@@ -203,16 +203,16 @@ SCHEMA = {
             ('data_opcao_mei', 'DATE'),
             ('data_exclusao_mei', 'DATE')
         ],
-        'primary_key': ['cnpj_basico'],  # PK para garantir unicidade e performance
+        'primary_key': ['cnpj_basico'],  # PK to guarantee uniqueness and performance
         'foreign_keys': [
             {'columns': ['cnpj_basico'], 'references': 'empresa(cnpj_basico)'}
         ],
         'indexes': [
-            # Índice composto para consultas que combinam opção + cnpj
+            # Composite index for queries that combine option + cnpj
             {'name': 'idx_simples_opcoes', 'columns': ['opcao_simples', 'opcao_mei', 'cnpj_basico']}
         ]
-        # NOTA: Índices parciais para opcao_simples='S' e opcao_mei='S'
-        # estão definidos em advanced_indexes.py
+        # NOTE: Partial indexes for opcao_simples='S' and opcao_mei='S'
+        # are defined in advanced_indexes.py
     },
     'socio': {
         'source_file_stem': 'Socios',
@@ -245,9 +245,9 @@ SCHEMA = {
     'estabelecimento_cnae_sec': {
         'source_file_stem': 'Estabelecimentos',
         'columns': [
-            ('cnpj_completo', 'CHAR(14) NOT NULL'),  # Computado no Python durante carga
+            ('cnpj_completo', 'CHAR(14) NOT NULL'),  # Computed in Python during load
             ('cod_cnae', 'VARCHAR(7) NOT NULL'),
-            # Colunas desnormalizadas para evitar JOINs custosos
+            # Denormalized columns to avoid expensive JOINs
             ('cod_regiao_ibge', 'SMALLINT'),
             ('cod_estado_ibge', 'SMALLINT'),
             ('cod_cidade_ibge', 'INTEGER'),

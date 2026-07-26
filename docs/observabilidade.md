@@ -47,7 +47,7 @@ pipeline roda normalmente.
 
 Ao iniciar, o pipeline lê o estado do período e, para cada etapa:
 
-- `success` → **pula** (`ETAPA JÁ CONCLUÍDA, PULANDO: indices`);
+- `success` → **pula** (`ETAPA JÁ CONCLUÍDA, PULANDO: indexes`);
 - `pending` ou `failed` → **executa** (incrementando `attempts`);
 - `failed` com `attempts >= --max-attempts` (padrão 3) → **aborta** com
   instrução, em vez de repetir o mesmo erro para sempre. É a proteção contra um
@@ -63,20 +63,47 @@ Na ordem de execução:
 
 | # | Nome no estado | Corresponde a |
 |---|---|---|
-| 1 | `download_arquivos` | download dos ZIPs da RFB |
-| 2 | `validacao_arquivos` | validação dos ZIPs baixados |
+| 1 | `download` | download dos ZIPs da RFB |
+| 2 | `file_validation` | validação dos ZIPs baixados |
 | 3 | `schema_init` | criação do banco, extensões, tabelas e IBGE |
-| 4 | `carga_dados` | `COPY` dos CSVs |
+| 4 | `data_load` | `COPY` dos CSVs |
 | 5 | `patches` | correções estáticas pós-carga |
-| 6 | `tabelas_logged` | conversão UNLOGGED → LOGGED |
-| 7 | `chaves_primarias` | primary keys |
-| 8 | `indices` | índices básicos e avançados |
-| 9 | `chaves_estrangeiras` | foreign keys |
-| 10 | `tabela_busca` | `busca_estabelecimento` (build-and-swap) |
+| 6 | `tables_logged` | conversão UNLOGGED → LOGGED |
+| 7 | `primary_keys` | primary keys |
+| 8 | `indexes` | índices básicos e avançados |
+| 9 | `foreign_keys` | foreign keys |
+| 10 | `search_table` | `busca_estabelecimento` (build-and-swap) |
 | 11 | `materialized_views` | as 13 MVs |
+
+Os nomes das etapas — assim como todas as chaves do estado, dos webhooks e dos
+JSONB de `pipeline_stats` — são **em inglês** e formam o contrato público
+consumido por dashboard e integrações. O dashboard traduz os nomes para
+exibição em português.
 
 `db views refresh` **não** entra no estado: reexecutá-lo é sempre válido e não
 há o que retomar.
+
+### Falha parcial não passa em silêncio
+
+A regra distingue **problemas nossos** (falham a etapa) de **dado defeituoso
+da origem** (isolado e documentado, sem condenar o fluxo):
+
+- **`download`** — se algum arquivo falhar definitivamente (após as
+  retentativas com retomada por `Range`), a etapa termina como `failed`
+  listando os arquivos; reexecutar baixa apenas o que falta.
+- **`data_load`** — um lote de COPY que falha é retentado (com reconexão); se
+  falhar de vez — normalmente dado malformado no próprio arquivo da RFB — as
+  linhas são **isoladas** em `data/logs/dead_letter/` (CSV + `.meta`), não
+  entram na contagem de inseridos, e a perda é registrada em três lugares:
+  aviso destacado no log, metadata da etapa no estado (`failed_batches`,
+  `failed_rows`, `dead_letter_files`) e nota âmbar no dashboard. **A etapa
+  conclui e o pipeline segue** — um lote fora do nosso controle não derruba
+  uma carga de horas. O reprocessamento (automático ou após correção manual
+  do CSV) é feito com `python etl.py db dead-letter --retry`
+  ([referência](commands.md#comando-db-dead-letter)).
+- **`foreign_keys` e `indexes`** — todos os objetos são tentados; qualquer
+  falha faz a etapa terminar como `failed` listando o que ficou faltando (era
+  exatamente o modo de falha silenciosa do incidente de 07/2026).
 
 ### Schema do arquivo de estado
 
@@ -89,7 +116,7 @@ há o que retomar.
   "status": "in_progress",
   "steps": [
     {
-      "name": "download_arquivos",
+      "name": "download",
       "status": "success",
       "started_at": "2026-07-25T14:32:11-03:00",
       "finished_at": "2026-07-25T14:35:02-03:00",
@@ -98,7 +125,7 @@ há o que retomar.
       "metadata": { "files_downloaded": 37, "total_bytes": 7648210944 }
     },
     {
-      "name": "carga_dados",
+      "name": "data_load",
       "status": "pending",
       "started_at": null,
       "finished_at": null,
@@ -121,7 +148,7 @@ há o que retomar.
 | `steps[].started_at` / `finished_at` | ISO 8601 com offset \| `null` | — |
 | `steps[].error` | string \| `null` | mensagem da exceção |
 | `steps[].attempts` | inteiro | tentativas já feitas |
-| `steps[].metadata` | objeto | métricas e progresso da etapa (ex.: `files_downloaded`, `records_inserted`, `tabela_atual`, `percentual`) |
+| `steps[].metadata` | objeto | métricas e progresso da etapa (ex.: `files_downloaded`, `records_inserted`, `current_table`, `percent`); em `data_load` com perdas, também `failed_batches`, `failed_rows` e `dead_letter_files` |
 | `environment` | objeto | onde a execução roda (ver [Ambiente e banco](#ambiente-e-banco)) |
 | `database` | objeto | banco alvo; atualizado ao fim de cada etapa |
 
@@ -177,13 +204,15 @@ colunas separadas.
 ```json
 [
   {
-    "nome_arquivo": "Empresas0.zip",
-    "tamanho_bytes": 48213120,
-    "url_origem": "https://arquivos.receitafederal.gov.br/.../Empresas0.zip",
-    "baixado_em": "2026-07-25T14:33:40-03:00"
+    "filename": "Empresas0.zip",
+    "size_bytes": 48213120,
+    "source_url": "https://arquivos.receitafederal.gov.br/.../Empresas0.zip",
+    "downloaded_at": "2026-07-25T14:33:40-03:00"
   }
 ]
 ```
+
+`tables_populated` guarda `[{"table": "estabelecimento", "rows": 72318968}, ...]`.
 
 `tables_populated` usa a contagem viva do catálogo (`pg_stat_user_tables`), não
 `COUNT(*)`: em `estabelecimento` (72M linhas) a contagem exata custaria minutos
@@ -209,11 +238,11 @@ SELECT reference_period, records_inserted_total,
  ORDER BY reference_period;
 
 -- Arquivos maiores que 1 GB na última execução
-SELECT d->>'nome_arquivo' AS arquivo,
-       pg_size_pretty((d->>'tamanho_bytes')::bigint) AS tamanho
+SELECT d->>'filename' AS arquivo,
+       pg_size_pretty((d->>'size_bytes')::bigint) AS tamanho
   FROM pipeline_stats, jsonb_array_elements(files_downloaded_detail) d
  WHERE run_id = (SELECT run_id FROM pipeline_stats ORDER BY started_at DESC LIMIT 1)
-   AND (d->>'tamanho_bytes')::bigint > 1073741824;
+   AND (d->>'size_bytes')::bigint > 1073741824;
 ```
 
 ---
@@ -303,12 +332,12 @@ dashboard mostra isso com uma barra fina abaixo do nome:
 
 | Etapa | O que aparece |
 |---|---|
-| `download_arquivos` | `12 de 37 arquivos · 25 restantes · Empresas3.zip · 32.4%` |
-| `carga_dados` | `98.721.430 de 218.380.000 registros · tabela estabelecimento · Estabelecimentos4.zip · 45.2%` |
+| `download` | `12 de 37 arquivos · 25 restantes · Empresas3.zip · 32.4%` |
+| `data_load` | `98.721.430 de 218.380.000 registros · tabela estabelecimento · Estabelecimentos4.zip · 45.2%` |
 
-Esses campos ficam em `steps[].metadata` (`tabela_atual`, `arquivo_atual`,
-`records_inserted`, `records_total`, `arquivos_baixados`, `arquivos_total`,
-`arquivos_restantes`, `percentual`) e só são exibidos enquanto a etapa está
+Esses campos ficam em `steps[].metadata` (`current_table`, `current_file`,
+`records_inserted`, `records_total`, `files_downloaded`, `files_total`,
+`files_remaining`, `percent`) e só são exibidos enquanto a etapa está
 `running`.
 
 > A carga chama o publicador **a cada lote** — centenas de vezes. Para não
@@ -338,6 +367,11 @@ envia pacote**, só resolve a rota — `gethostbyname` costuma devolver
 O bloco do banco é reavaliado **ao fim de cada etapa**, então dá para ver o
 tamanho crescer ao longo da carga. **A senha nunca é coletada** — só host,
 porta, database e usuário.
+
+No JSON de estado, os blocos usam chaves em inglês: `environment`
+(`hostname`, `ip`, `python`, `os`, `arch`, `cpus`, `pid`, `runtime`,
+`container_id`, `orchestrator`) e `database` (`host`, `port`, `database`,
+`user`, `version`, `size`, `connections`, `reachable`).
 
 Acompanha tema claro e escuro conforme a preferência do sistema.
 
@@ -426,7 +460,7 @@ A flag tem prioridade sobre a variável de ambiente.
   "run_id": "3f2a1b8c-5d6e-4f70-8a91-2b3c4d5e6f70",
   "reference_period": "2026-07",
   "step": {
-    "name": "download_arquivos",
+    "name": "download",
     "status": "success",
     "started_at": "2026-07-25T14:32:11-03:00",
     "finished_at": "2026-07-25T14:35:02-03:00",
@@ -514,10 +548,10 @@ dentro do container, use `--port` e ajuste os dois lados.
 
 > ⚠️ **Com `--network host` (como na execução mensal em produção) o `-p` é
 > ignorado** e `--host 0.0.0.0` faz o dashboard ouvir em **todas** as
-> interfaces da máquina, inclusive a pública. O dashboard não tem
-> autenticação e exibe mensagens de erro do pipeline. Nesse modo, ou proteja a
-> porta 3010 no firewall, ou deixe o padrão `127.0.0.1` e acesse por túnel
-> SSH:
+> interfaces da máquina, inclusive a pública. O dashboard tem Basic Auth por
+> padrão, mas sem TLS a credencial trafega em claro e a página exibe mensagens
+> de erro do pipeline. Nesse modo, ou proteja a porta 3010 no firewall, ou
+> deixe o padrão `127.0.0.1` e acesse por túnel SSH:
 >
 > ```bash
 > ssh -N -L 3010:127.0.0.1:3010 root@servidor    # do seu computador
@@ -608,7 +642,9 @@ docker rm -f cnpj-run && docker run ... complete --month 07/2026
 
 ## Referência das flags
 
-Disponíveis em `download`, `complete` e em todos os subcomandos `db`:
+Disponíveis em `download`, `complete` e nos subcomandos `db` — **exceto
+`db views refresh`**, que não abre estado nem registra execução (passar estas
+flags a ele resulta em erro de argumento):
 
 | Flag | Variável de ambiente | Padrão | O que faz |
 |---|---|---|---|
@@ -658,9 +694,10 @@ python etl.py db fk                # refaz só as foreign keys
 ## Testes
 
 ```bash
-python3 tests/test_observabilidade.py   # estado, retomada, webhooks, dashboard
+python3 tests/test_observability.py     # estado, retomada, webhooks, dashboard
 python3 tests/test_pipeline_stats.py    # tabela de stats (sobe Postgres em Docker)
-python3 tests/test_e2e_retomada.py      # CLI real ponta a ponta
+python3 tests/test_e2e_resume.py        # CLI real ponta a ponta
+python3 tests/test_load_failures.py     # retry/dead-letter da carga, FKs e índices
 ```
 
 Os dois últimos sobem um PostgreSQL descartável via Docker e o removem ao

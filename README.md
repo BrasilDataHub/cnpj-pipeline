@@ -60,6 +60,12 @@ Variáveis lidas pelo pipeline (todas opcionais; os valores abaixo são os defau
 | `PIPELINE_DASHBOARD_USER` | Usuário do dashboard | `pipeline` |
 | `PIPELINE_REFRESH_SECONDS` | Intervalo inicial do polling da página | `6` |
 | `PIPELINE_MAX_ATTEMPTS` | Tentativas por etapa antes de exigir intervenção | `3` |
+| `PIPELINE_DEAD_LETTER_DIR` | Diretório onde lotes de COPY que falharam são preservados | `data/logs/dead_letter` |
+| `INDEX_MAX_WORKERS` | Conexões simultâneas na criação de índices | `4` |
+| `INDEX_MAINTENANCE_WORK_MEM` | `maintenance_work_mem` por conexão de criação de índice | `2GB` |
+
+Referência canônica (com detalhes e implicações de memória):
+[Configuração](docs/configuration.md).
 
 Variáveis consumidas apenas pelo `docker-compose.yaml` (não pelo código Python):
 `FORWARD_DB_PORT`, `DADOS_READ_PASSWORD`, `PG_SHARED_BUFFERS`, `PG_EFFECTIVE_CACHE_SIZE`,
@@ -281,20 +287,21 @@ docker compose build etl
 Opção global disponível em todos os comandos: `--log-file <caminho>` (aceita o
 placeholder `{date}`; tem prioridade sobre a variável `LOG_FILE`).
 
-As flags de **observabilidade** valem em `download`, `complete` e em todos os
-subcomandos `db` — detalhes em
+As flags de **observabilidade** valem em `download`, `complete` e nos
+subcomandos `db` (exceto `db views refresh`, que não abre estado) — detalhes em
 [Observabilidade e retomada](docs/observabilidade.md):
 
 | Flag | Variável | Padrão | O que faz |
 |---|---|---|---|
-| `--force` | — | desligado | ignora o estado e reexecuta tudo (backup `.bak` do anterior) |
+| `--force` / `--force-restart` | — | desligado | ignora o estado e reexecuta tudo (backup `.bak` do anterior) |
 | `--no-state` | — | desligado | desliga o checkpoint/retomada |
-| `--reference-period` | — | inferido | período dos dados (`AAAA-MM`), para subcomandos sem `--month` |
+| `--reference-period` | — | inferido | período dos dados (`AAAA-MM` ou `MM/AAAA`), para subcomandos sem `--month` |
 | `--max-attempts` | `PIPELINE_MAX_ATTEMPTS` | `3` | tentativas por etapa antes de exigir intervenção |
 | `--serve` | — | desligado | sobe o dashboard web somente leitura |
 | `--port` | `PIPELINE_PORT` | `3010` | porta do dashboard |
 | `--host` | — | `127.0.0.1` | interface do dashboard (`0.0.0.0` em container) |
 | `--dashboard-password` | `PIPELINE_DASHBOARD_PASSWORD` | gerada | senha do dashboard (Basic Auth) |
+| `--dashboard-user` | `PIPELINE_DASHBOARD_USER` | `pipeline` | usuário do dashboard |
 | `--no-auth` | — | desligado | serve o dashboard sem autenticação |
 | `--webhook-url` | `PIPELINE_WEBHOOK_URL` | — | notificações HTTP por etapa |
 
@@ -312,9 +319,25 @@ subcomandos `db` — detalhes em
 | `db pk` | `--db-name` | Cria as primary keys |
 | `db fk` | `--db-name` | Cria as foreign keys |
 | `db search` | `--db-name` | Reconstrói `busca_estabelecimento` (build-and-swap) |
+| `db dead-letter` | `--retry`, `--db-name`, `--dir` | Lista/reprocessa lotes de COPY preservados após falha |
 | `db views create` | `--db-name` | Cria as Materialized Views |
 | `db views refresh` | `--db-name`, `--concurrent` | Atualiza as Materialized Views |
-| `complete` | `--month`, `--db-name`, `--download-dir`, `--workers`, `--clean`, `--parallel`, `--skip-download`, `--skip-index`, `--skip-validation`, `--skip-views`, `--low-memory` | Pipeline completo |
+| `complete` | `--month`, `--db-name`, `--download-dir`, `--workers`, `--clean`, `--parallel true\|false`, `--skip-download`, `--skip-index`, `--skip-validation`, `--skip-views`, `--low-memory` | Pipeline completo |
+
+Notas:
+- `--parallel` é **ligado por padrão** em `db load` e `complete`; use
+  `--parallel false` para carga single-thread.
+- Em `complete`, `--download-dir` é a **raiz** de downloads (os ZIPs vão para
+  `<dir>/AAAA-MM/`); em `db load`, aponta **diretamente** para a pasta dos ZIPs.
+- `--skip-download` implica `--skip-validation`.
+- O CLI termina com **exit code ≠ 0 em qualquer falha** (inclusive validação de
+  arquivos), o que torna cron/CI confiáveis.
+- Falhas parciais não passam em silêncio: download incompleto, FK ou índice
+  que falhou marcam a etapa como FALHA no estado. Já um **lote de COPY
+  defeituoso** (geralmente dado malformado da própria RFB) **não derruba a
+  carga**: ele é isolado em `data/logs/dead_letter/`, documentado no log, no
+  estado e no dashboard, e reprocessado depois com
+  `python etl.py db dead-letter --retry` (com ou sem correção manual do CSV).
 
 O mesmo comando vale nos três formatos:
 
@@ -421,9 +444,16 @@ Detalhes de schema, webhooks e dashboard:
 |-----------|-----------|
 | [Guia Docker](docs/docker.md) | Volumes, permissões, execução remota |
 | [Referência de Comandos](docs/commands.md) | Todos os comandos, flags e execução por etapas |
-| [Configuração](docs/configuration.md) | Personalização, variáveis de ambiente, scripts SQL |
+| [Configuração](docs/configuration.md) | Referência canônica de variáveis de ambiente e constantes |
 | [Guia do Banco de Dados](docs/database.md) | Estrutura do banco, índices, MVs e consultas |
 | [Observabilidade e retomada](docs/observabilidade.md) | Estado, `--force`, dashboard, webhooks e `pipeline_stats` |
+| [Limpeza de índices (07/2026)](docs/index_cleanup.md) | Registro datado: quais índices foram removidos e por quê |
+| [Auditoria completa (07/2026)](docs/auditoria-2026-07.md) | Registro datado: inventário, bugs corrigidos, contrato em inglês e otimizações |
+| [Investigação de erros (07/2026)](INVESTIGACAO-ERROS-2026-07.md) | Post-mortem do incidente de 25/07/2026 (`/dev/shm`, FKs, SIAFI→IBGE) |
+
+Os três últimos são **registros datados** (post-mortems/auditorias): documentam
+decisões e incidentes no momento em que ocorreram e não são atualizados
+retroativamente.
 
 ## Estrutura do Projeto
 
@@ -447,10 +477,12 @@ cnpj-pipeline/
 ├── sql/                   # Scripts SQL auxiliares
 │   └── materialized_views/ # Scripts de MVs
 ├── data/                  # Downloads, logs, estado e dados IBGE
-│   └── state/             # pipeline_state_AAAA-MM.json
+│   ├── state/             # pipeline_state_AAAA-MM.json
+│   └── logs/dead_letter/  # Lotes de COPY que falharam (CSV + .meta)
 ├── docker/
 │   └── Dockerfile         # Imagem do pipeline
 ├── docker-compose.yaml
+├── cnpj-metadados.pdf     # Dicionário de dados oficial da RFB
 ├── etl.py                 # Wrapper CLI
 └── requirements.txt
 ```

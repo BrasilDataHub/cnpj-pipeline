@@ -1,7 +1,7 @@
 # utils/db_patch.py
 
 """
-Aplica correções estáticas na base de dados.
+Applies static fixes to the database.
 """
 
 from ..utils.logger import print_log
@@ -9,29 +9,29 @@ from ..utils.logger import print_log
 
 def apply_static_fixes(conn):
     """
-    Aplica correções estáticas na base de dados.
+    Applies static fixes to the database.
 
-    Ordem de execução otimizada:
-    1. INSERTs de dados de referência faltantes (países, qualificações, motivos)
-    2. UPDATEs para normalização de dados
-    3. DELETEs para remoção de duplicatas/inconsistências
-    4. VACUUM ANALYZE para recuperar espaço e atualizar estatísticas
+    Optimized execution order:
+    1. INSERTs of missing reference data (countries, qualifications, reasons)
+    2. UPDATEs for data normalization
+    3. DELETEs to remove duplicates/inconsistencies
+    4. VACUUM ANALYZE to reclaim space and refresh statistics
 
     :params:
-        conn: conexão com o banco de dados.
+        conn: database connection.
     """
     try:
         print_log("APLICANDO CORREÇÕES NA BASE DE DADOS...", level="task")
         cur = conn.cursor()
 
         # =====================================================================
-        # FASE 1: INSERTs de dados de referência faltantes
-        # Executar ANTES de qualquer UPDATE/DELETE para evitar FK violations
+        # PHASE 1: INSERTs of missing reference data
+        # Run BEFORE any UPDATE/DELETE to avoid FK violations
         # =====================================================================
 
         print_log("  -> Inserindo dados de referência faltantes...", level="docs")
 
-        # Países extras que não constam no arquivo original da RFB
+        # Extra countries that are not present in the original RFB file
         cur.execute("""
                     INSERT INTO pais (cod_pais, nome_pais)
                     VALUES ('008', 'ABU DHABI'),
@@ -55,14 +55,14 @@ def apply_static_fixes(conn):
                     ON CONFLICT (cod_pais) DO NOTHING;
                     """)
 
-        # Qualificação de sócio faltante
+        # Missing partner qualification
         cur.execute("""
                     INSERT INTO qualificacao_socio (cod_qualificacao, nome_qualificacao)
                     VALUES ('36', 'Gerente-Delegado')
                     ON CONFLICT (cod_qualificacao) DO NOTHING;
                     """)
 
-        # Motivos de situação cadastral faltantes
+        # Missing registration status reasons
         cur.execute("""
                     INSERT INTO motivo (cod_motivo, nome_motivo)
                     VALUES ('32', 'DECURSO DE PRAZO DE INTERRUPCAO TEMPORARIA'),
@@ -74,12 +74,12 @@ def apply_static_fixes(conn):
         conn.commit()
 
         # =====================================================================
-        # FASE 2: UPDATEs para normalização de dados
+        # PHASE 2: UPDATEs for data normalization
         # =====================================================================
 
         print_log("  -> Normalizando dados...", level="docs")
 
-        # Normaliza cod_pais com padding de zeros (antes de limpar '0' inválido)
+        # Normalizes cod_pais with zero padding (before clearing the invalid '0')
         cur.execute("""
                     UPDATE estabelecimento
                     SET cod_pais = LPAD(cod_pais, 3, '0')
@@ -87,50 +87,51 @@ def apply_static_fixes(conn):
                       AND LENGTH(TRIM(cod_pais)) = 2;
                     """)
 
-        # Remove cod_pais = '0' (código inválido) - após países extras inseridos
+        # Removes cod_pais = '0' (invalid code) - after the extra countries are inserted
         cur.execute("UPDATE estabelecimento SET cod_pais = NULL WHERE cod_pais = '0';")
 
-        # Normaliza cod_porte vazio para '00' (não informado)
+        # Normalizes an empty cod_porte to '00' (not informed)
         cur.execute("UPDATE empresa SET cod_porte = '00' WHERE cod_porte = '';")
 
         conn.commit()
 
         # =====================================================================
-        # FASE 2.5: rede de segurança para cod_pais órfão
+        # PHASE 2.5: safety net for orphan cod_pais
         # ---------------------------------------------------------------------
-        # A lista fixa da FASE 1 cobre os códigos extras já conhecidos, mas a
-        # RFB publica em `estabelecimento`/`socio` códigos legados que não
-        # constam do PAISCSV do mesmo mês — e o conjunto muda de mês para mês
-        # (em 07/2026: 042, 693 e 755, todos buracos na sequência da tabela de
-        # domínio). Cada código órfão aborta a criação de fk_estabelecimento_3
-        # ou fk_socio_2, deixando a base sem essas duas FKs em silêncio.
+        # The fixed list in PHASE 1 covers the extra codes already known, but
+        # the RFB publishes in `estabelecimento`/`socio` legacy codes that are
+        # not present in the PAISCSV of the same month — and the set changes
+        # from month to month (in 07/2026: 042, 693 and 755, all of them gaps
+        # in the sequence of the domain table). Each orphan code aborts the
+        # creation of fk_estabelecimento_3 or fk_socio_2, silently leaving the
+        # database without those two FKs.
         #
-        # Este bloco absorve qualquer código novo automaticamente, sem exigir
-        # que alguém edite a lista acima todo mês. Precisa rodar DEPOIS do LPAD
-        # da FASE 2 — antes dele, códigos de 2 dígitos entrariam sem padding.
+        # This block absorbs any new code automatically, without requiring
+        # someone to edit the list above every month. It has to run AFTER the
+        # LPAD of PHASE 2 — before it, 2-digit codes would go in without padding.
         # =====================================================================
 
         print_log("  -> Absorvendo códigos de país órfãos...", level="docs")
 
-        paises_inseridos = 0
-        for tabela in ("estabelecimento", "socio"):
+        inserted_countries = 0
+        for table in ("estabelecimento", "socio"):
             cur.execute(f"""
                         INSERT INTO pais (cod_pais, nome_pais)
                         SELECT DISTINCT o.cod_pais, 'CODIGO NAO CONSTANTE NA TABELA RFB'
-                          FROM {tabela} o
+                          FROM {table} o
                          WHERE o.cod_pais IS NOT NULL
                            AND NOT EXISTS (
                                SELECT 1 FROM pais p WHERE p.cod_pais = o.cod_pais
                            )
                         ON CONFLICT (cod_pais) DO NOTHING;
                         """)
-            paises_inseridos += cur.rowcount or 0
+            inserted_countries += cur.rowcount or 0
 
-        # Reportar sempre: um código órfão novo é sinal de mudança na origem,
-        # e o silêncio aqui foi o que escondeu o problema até 07/2026.
-        if paises_inseridos:
+        # Always report: a new orphan code is a sign of a change at the source,
+        # and the silence here is what hid the problem until 07/2026.
+        if inserted_countries:
             print_log(
-                f"  -> {paises_inseridos} código(s) de país órfão(s) absorvido(s) "
+                f"  -> {inserted_countries} código(s) de país órfão(s) absorvido(s) "
                 f"— ausentes do PAISCSV da RFB",
                 level="warning"
             )
@@ -138,13 +139,13 @@ def apply_static_fixes(conn):
         conn.commit()
 
         # =====================================================================
-        # FASE 3: DELETEs para remoção de duplicatas/inconsistências
+        # PHASE 3: DELETEs to remove duplicates/inconsistencies
         # =====================================================================
 
         print_log("  -> Removendo duplicatas e inconsistências...", level="docs")
 
-        # Remove duplicatas de empresa, mantendo o registro com razao_social preenchida
-        query_delete_duplicatas = """
+        # Removes duplicate empresa rows, keeping the one with razao_social filled in
+        dedup_delete_query = """
             DELETE FROM empresa
             WHERE ctid IN (
                 SELECT ctid
@@ -162,9 +163,9 @@ def apply_static_fixes(conn):
                 WHERE t.rn > 1
             );
         """
-        cur.execute(query_delete_duplicatas)
+        cur.execute(dedup_delete_query)
 
-        # Remove registros órfãos de simples que causam problemas de FK
+        # Removes orphan simples records that cause FK problems
         cur.execute("""
                     DELETE FROM simples
                     WHERE cnpj_basico IN (
@@ -176,12 +177,12 @@ def apply_static_fixes(conn):
         conn.commit()
 
         # =====================================================================
-        # FASE 4: VACUUM ANALYZE para recuperar espaço após DELETEs massivos
+        # PHASE 4: VACUUM ANALYZE to reclaim space after the massive DELETEs
         # =====================================================================
 
         print_log("  -> Executando VACUUM ANALYZE nas tabelas modificadas...", level="docs")
 
-        # Necessário autocommit para VACUUM
+        # autocommit is required for VACUUM
         old_autocommit = conn.autocommit
         conn.autocommit = True
 

@@ -1,15 +1,15 @@
 # utils/environment.py
 
 """
-Identificação do ambiente de execução e do banco alvo.
+Identification of the execution environment and the target database.
 
-Serve para responder, olhando o dashboard, a pergunta prática de quem opera
-mais de uma máquina: *onde* esta carga está rodando, *como* (container ou
-Python direto) e *contra qual* banco.
+Answers the practical questions of whoever operates more than one machine by
+just looking at the dashboard: *where* this load is running, *how* (container
+or bare Python) and *against which* database.
 
-Nada aqui é sensível por desenho: senha nunca é coletada, e o que sobra
-(hostname, IP interno, versão do PostgreSQL) já está visível para quem tem
-acesso ao dashboard autenticado.
+Nothing here is sensitive by design: the password is never collected, and
+what remains (hostname, internal IP, PostgreSQL version) is already visible
+to anyone with access to the authenticated dashboard.
 """
 
 import os
@@ -21,19 +21,19 @@ from typing import Any, Dict, Optional
 from .logger import print_log
 
 
-def _ip_local() -> Optional[str]:
-    """IP da interface que o SO usaria para sair da máquina.
+def _local_ip() -> Optional[str]:
+    """IP of the interface the OS would use to leave the machine.
 
-    O `connect` num socket UDP **não envia pacote algum** — apenas faz o
-    kernel escolher a rota e preencher o endereço de origem. É o jeito
-    confiável de descobrir o IP útil numa máquina com várias interfaces
-    (`gethostbyname` costuma devolver 127.0.0.1 em container).
+    `connect` on a UDP socket **sends no packet at all** — it only makes the
+    kernel pick the route and fill in the source address. It is the reliable
+    way to find the useful IP on a machine with several interfaces
+    (`gethostbyname` tends to return 127.0.0.1 inside containers).
     """
     s = None
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.settimeout(0.5)
-        s.connect(("192.0.2.1", 9))     # TEST-NET-1 (RFC 5737): nunca roteável
+        s.connect(("192.0.2.1", 9))     # TEST-NET-1 (RFC 5737): never routable
         return s.getsockname()[0]
     except OSError:
         try:
@@ -45,92 +45,93 @@ def _ip_local() -> Optional[str]:
             s.close()
 
 
-def _detectar_runtime() -> Dict[str, Any]:
-    """Distingue container de execução direta, e identifica o orquestrador."""
-    em_docker = Path("/.dockerenv").exists()
+def _detect_runtime() -> Dict[str, Any]:
+    """Distinguishes container from direct execution and identifies the orchestrator."""
+    in_docker = Path("/.dockerenv").exists()
     container_id = None
-    orquestrador = None
+    orchestrator = None
 
     if os.getenv("KUBERNETES_SERVICE_HOST"):
-        orquestrador = "kubernetes"
+        orchestrator = "kubernetes"
 
-    # cgroup v1 traz o id do container no caminho; v2 costuma não trazer,
-    # por isso ele é complemento e não a checagem principal.
+    # cgroup v1 carries the container id in the path; v2 usually does not,
+    # which is why this is a complement and not the primary check.
     try:
         cgroup = Path("/proc/1/cgroup").read_text(encoding="utf-8", errors="ignore")
-        if any(marca in cgroup for marca in ("docker", "containerd", "kubepods")):
-            em_docker = True
-        for linha in cgroup.splitlines():
-            partes = linha.strip().split("/")
-            if partes and len(partes[-1]) == 64 and all(c in "0123456789abcdef" for c in partes[-1]):
-                container_id = partes[-1][:12]
+        if any(marker in cgroup for marker in ("docker", "containerd", "kubepods")):
+            in_docker = True
+        for line in cgroup.splitlines():
+            parts = line.strip().split("/")
+            if parts and len(parts[-1]) == 64 and all(c in "0123456789abcdef" for c in parts[-1]):
+                container_id = parts[-1][:12]
                 break
     except OSError:
         pass
 
-    if em_docker and container_id is None:
-        # Em container o hostname é, por padrão, o id curto.
-        nome = socket.gethostname()
-        if len(nome) == 12 and all(c in "0123456789abcdef" for c in nome):
-            container_id = nome
+    if in_docker and container_id is None:
+        # Inside a container the hostname defaults to the short id.
+        hostname = socket.gethostname()
+        if len(hostname) == 12 and all(c in "0123456789abcdef" for c in hostname):
+            container_id = hostname
 
     return {
-        "runtime": "docker" if em_docker else "python",
+        "runtime": "docker" if in_docker else "python",
         "container_id": container_id,
-        "orquestrador": orquestrador,
+        "orchestrator": orchestrator,
     }
 
 
 def collect_environment() -> Dict[str, Any]:
-    """Retorna o retrato do ambiente. Nunca levanta exceção."""
+    """Returns the environment snapshot. Never raises."""
     try:
         info: Dict[str, Any] = {
             "hostname": socket.gethostname(),
-            "ip": _ip_local(),
+            "ip": _local_ip(),
             "python": platform.python_version(),
-            "so": f"{platform.system()} {platform.release()}",
-            "arquitetura": platform.machine(),
+            "os": f"{platform.system()} {platform.release()}",
+            "arch": platform.machine(),
             "cpus": os.cpu_count(),
             "pid": os.getpid(),
         }
-        info.update(_detectar_runtime())
+        info.update(_detect_runtime())
         return info
-    except Exception as exc:      # ambiente é informativo; nunca bloqueia
+    except Exception as exc:      # environment is informational; never blocks
         print_log(f"NÃO FOI POSSÍVEL COLETAR DADOS DO AMBIENTE: {exc}", level="warning")
         return {}
 
 
 def collect_database_info(postgres_config: Dict[str, Any]) -> Dict[str, Any]:
-    """Dados do banco alvo: destino, versão e tamanho atual.
+    """Target database info: destination, version and current size.
 
-    A senha da configuração **não** é lida. Retorna dict vazio se o banco não
-    responder — o pipeline pode estar numa etapa que nem usa banco.
+    The configured password is **not** read. Returns the connection block
+    with `reachable: false` when the database does not respond — the pipeline
+    may be at a step that does not even use the database.
     """
     info: Dict[str, Any] = {
         "host": postgres_config.get("host"),
-        "porta": postgres_config.get("port"),
+        "port": postgres_config.get("port"),
         "database": postgres_config.get("database"),
-        "usuario": postgres_config.get("user"),
+        "user": postgres_config.get("user"),
     }
     try:
         import psycopg2
         conn = psycopg2.connect(**postgres_config, connect_timeout=5)
     except Exception:
-        info["acessivel"] = False
+        info["reachable"] = False
         return info
 
     try:
         conn.autocommit = True
         with conn.cursor() as cur:
             cur.execute("SHOW server_version;")
-            info["versao"] = f"PostgreSQL {cur.fetchone()[0]}"
+            info["version"] = f"PostgreSQL {cur.fetchone()[0]}"
             cur.execute("SELECT pg_size_pretty(pg_database_size(current_database()));")
-            info["tamanho"] = cur.fetchone()[0]
+            info["size"] = cur.fetchone()[0]
             cur.execute("SELECT count(*) FROM pg_stat_activity WHERE datname = current_database();")
-            info["conexoes"] = int(cur.fetchone()[0])
-        info["acessivel"] = True
+            info["connections"] = int(cur.fetchone()[0])
+        info["reachable"] = True
     except Exception:
-        info["acessivel"] = False
+        info["reachable"] = False
     finally:
         try:
             conn.close()

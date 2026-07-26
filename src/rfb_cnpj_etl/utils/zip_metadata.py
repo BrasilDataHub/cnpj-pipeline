@@ -1,7 +1,7 @@
 # utils/zip_metadata.py
 
 """
-Módulo para lidar com metadados de arquivos ZIP.
+Module for handling ZIP file metadata.
 """
 
 import io
@@ -15,7 +15,7 @@ from .logger import print_log
 
 def validate_zip_files(month_year: str, files_dir: str):
     """
-    Valida os arquivos baixados.
+    Validates the downloaded files.
     """
     print_log(f"VALIDAÇÃO DOS ARQUIVOS ZIP...", level="task")
     print_log(f"PERÍODO: {month_year}", level="docs")
@@ -44,30 +44,30 @@ def validate_zip_files(month_year: str, files_dir: str):
     else:
         print_log("ERRO NA VALIDAÇÃO DOS ARQUIVOS", level="error")
         missing = set(remote_files) - set(local_files)
-        exceding = set(local_files) - set(remote_files)
+        exceeding = set(local_files) - set(remote_files)
         mismatched = {
             fname for fname in local_files
             if fname in remote_files and local_files[fname] != remote_files[fname]
         }
         if missing:
             print(f"{len(missing)} ARQUIVO(S) FALTANDO:", *missing, sep="\n- ")
-        if exceding:
-            print(f"REMOVA DA PASTA:", *exceding, sep="\n- ")
+        if exceeding:
+            print(f"REMOVA DA PASTA:", *exceeding, sep="\n- ")
         if mismatched:
             print(f"{len(mismatched)} ARQUIVO(S) COM TAMANHO(S) DIFERENTE(S):", *mismatched, sep="\n- ")
         return False
 
 
-def arredondar_para(numero: float, fator: int = 10000) -> int:
+def round_to_nearest(number: float, factor: int = 10000) -> int:
     """
-    Arredonda um número para o múltiplo mais próximo do fator especificado.
+    Rounds a number to the nearest multiple of the specified factor.
     """
-    return int(round(numero / fator)) * fator
+    return int(round(number / factor)) * factor
 
 
 def estimate_total_lines_from_size(directory_path: str) -> int:
     """
-    Estima o número total de linhas usando o tamanho dos arquivos.
+    Estimates the total number of lines using the file sizes.
     """
     print_log(f"Estimando número total de linhas para a pasta: {directory_path}", level="task")
 
@@ -89,7 +89,7 @@ def estimate_total_lines_from_size(directory_path: str) -> int:
         return 0
 
     estimated_lines = total_size_bytes / AVG_COMPRESSED_LINE_SIZE_BYTES
-    rounded_estimated_lines = arredondar_para(estimated_lines, fator=10000)
+    rounded_estimated_lines = round_to_nearest(estimated_lines, factor=10000)
 
     print_log(
         f"Estimativa de registros: {total_size_bytes / (1024 ** 3):.2f} GB de arquivos / {AVG_COMPRESSED_LINE_SIZE_BYTES} bytes/linha ~= {int(rounded_estimated_lines):,}".replace(
@@ -99,7 +99,7 @@ def estimate_total_lines_from_size(directory_path: str) -> int:
 
 def _count_lines(zip_path: str, encoding: str = 'latin1') -> int:
     """
-    Conta as linhas do único arquivo dentro do ZIP.
+    Counts the lines of the single file inside the ZIP.
     """
     try:
         with zipfile.ZipFile(zip_path, 'r') as z:
@@ -113,7 +113,7 @@ def _count_lines(zip_path: str, encoding: str = 'latin1') -> int:
 
 def estimate_total_lines_alternative(files_dir: str, encoding: str = 'latin1') -> int:
     """
-    Estima o número total de registros lendo e contando as linhas dos arquivos. (Método lento)
+    Estimates the total number of records by reading and counting the lines of the files. (Slow method)
     """
     print_log("CALCULANDO TOTAL DE REGISTROS (MÉTODO ALTERNATIVO)...", level="task")
 

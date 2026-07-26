@@ -1,7 +1,7 @@
 # utils/db_transformers.py
 
 """
-Transformadores de dados.
+Data transformers.
 """
 
 import csv
@@ -15,41 +15,41 @@ IBGE_LOOKUP = IBGELookup()
 
 def compute_cnpj_completo(rows: List[List], columns: List[str]) -> List[List]:
     """
-    Computa cnpj_completo concatenando cnpj_basico + cnpj_ordem + cnpj_dv.
+    Computes cnpj_completo by concatenating cnpj_basico + cnpj_ordem + cnpj_dv.
 
-    Esta função deve ser chamada durante o processo de transformação,
-    ANTES do COPY para o banco de dados.
+    This function must be called during the transformation process,
+    BEFORE the COPY into the database.
 
     Args:
-        rows: Lista de linhas (cada linha é uma lista de valores)
-        columns: Lista com os nomes das colunas na ordem correspondente
+        rows: List of rows (each row is a list of values)
+        columns: List with the column names in the corresponding order
 
     Returns:
-        Lista de linhas com cnpj_completo preenchido
+        List of rows with cnpj_completo filled in
 
-    Exemplo:
+    Example:
         Input:  cnpj_basico='12345678', cnpj_ordem='0001', cnpj_dv='00'
         Output: cnpj_completo='12345678000100'
     """
-    # Encontrar índices das colunas CNPJ
+    # Find the indexes of the CNPJ columns
     try:
         idx_basico = columns.index('cnpj_basico')
         idx_ordem = columns.index('cnpj_ordem')
         idx_dv = columns.index('cnpj_dv')
         idx_completo = columns.index('cnpj_completo')
     except ValueError:
-        # Se alguma coluna não existir, retorna rows sem modificação
+        # If any column does not exist, return rows unmodified
         return rows
 
     new_rows = []
     for row in rows:
         row = list(row)
-        # Garantir que os valores são strings e preencher com zeros à esquerda se necessário
+        # Ensure the values are strings and left-pad with zeros if needed
         basico = str(row[idx_basico] or '').zfill(8)
         ordem = str(row[idx_ordem] or '').zfill(4)
         dv = str(row[idx_dv] or '').zfill(2)
 
-        # Concatenar e garantir exatamente 14 caracteres
+        # Concatenate and ensure exactly 14 characters
         cnpj_completo = (basico + ordem + dv)[:14].ljust(14, '0')
         row[idx_completo] = cnpj_completo
         new_rows.append(row)
@@ -58,14 +58,14 @@ def compute_cnpj_completo(rows: List[List], columns: List[str]) -> List[List]:
 
 
 def sanitize_for_postgres(rows: List[List[Any]]) -> List[List[Any]]:
-    """Sanitiza para bancos de dados com encoding 'windows-1252'."""
+    """Sanitizes for databases with 'windows-1252' encoding."""
     cleaned_rows = []
     for row in rows:
         new_row = []
         for val in row:
             if isinstance(val, str):
                 s = val.replace('\x00', '').strip()
-                # Remove caracteres incompatíveis com windows-1252
+                # Remove characters incompatible with windows-1252
                 val = s.encode("windows-1252", "ignore").decode("windows-1252")
             new_row.append(val)
         cleaned_rows.append(new_row)
@@ -77,7 +77,7 @@ def normalize_numeric_br(
         columns: List[str],
         target_columns: Optional[List[str]] = None
 ) -> List[List]:
-    """Normaliza valores numéricos do formato brasileiro (1.234,56 → 1234.56)."""
+    """Normalizes numeric values from the Brazilian format (1.234,56 → 1234.56)."""
     new_rows = []
     col_indexes = (
         list(range(len(columns))) if target_columns is None
@@ -98,7 +98,7 @@ def normalize_dates(
         columns: List[str],
         target_columns: Optional[List[str]] = None
 ) -> List[List]:
-    """Converte datas do formato 'YYYYMMDD' para 'YYYY-MM-DD'."""
+    """Converts dates from the 'YYYYMMDD' format to 'YYYY-MM-DD'."""
     if target_columns is None:
         date_columns = [i for i, col in enumerate(columns) if col.startswith("data_")]
     else:
@@ -122,7 +122,7 @@ def normalize_dates(
 
 
 def convert_rows_to_csv_buffer(rows: List[List[Union[str, int, float, None]]]) -> BytesIO:
-    """Converte uma lista de linhas em um buffer de bytes CSV para o COPY do Postgres."""
+    """Converts a list of rows into a CSV byte buffer for the Postgres COPY."""
     text_buffer = StringIO()
     writer = csv.writer(text_buffer, delimiter=';', quoting=csv.QUOTE_MINIMAL, lineterminator='\n')
     writer.writerows(rows)
@@ -133,13 +133,13 @@ def convert_rows_to_csv_buffer(rows: List[List[Union[str, int, float, None]]]) -
 
 def transform_batch(item: dict, sanitizer_func: Callable) -> List:
     """
-    Aplica todas as transformações necessárias a um lote de dados.
+    Applies all the required transformations to a batch of data.
 
-    Ordem de transformações:
-    1. Sanitização (limpeza de caracteres inválidos)
-    2. Normalização de datas e valores numéricos
-    3. Enriquecimento IBGE (para estabelecimento)
-    4. Computação de cnpj_completo (para estabelecimento e estabelecimento_cnae_sec)
+    Transformation order:
+    1. Sanitization (cleanup of invalid characters)
+    2. Normalization of dates and numeric values
+    3. IBGE enrichment (for estabelecimento)
+    4. Computation of cnpj_completo (for estabelecimento and estabelecimento_cnae_sec)
     """
     table = item["table"]
     columns = item["columns"]
@@ -154,14 +154,14 @@ def transform_batch(item: dict, sanitizer_func: Callable) -> List:
         rows = normalize_dates(rows, columns, [
             "data_situacao_cadastral", "data_inicio_atividade", "data_situacao_especial"
         ])
-        rows = IBGE_LOOKUP.append_ibge_to_estabelecimentos(rows, columns)
-        # Computar CNPJ completo ANTES do COPY
+        rows = IBGE_LOOKUP.append_ibge_codes(rows, columns)
+        # Compute the full CNPJ BEFORE the COPY
         if 'cnpj_completo' in columns:
             rows = compute_cnpj_completo(rows, columns)
 
     elif table == "estabelecimento_cnae_sec":
-        # Normaliza data_inicio_atividade
-        # Nota: cnpj_completo já é computado no db_batch_producer.py para esta tabela
+        # Normalizes data_inicio_atividade
+        # Note: cnpj_completo is already computed in db_batch_producer.py for this table
         if 'data_inicio_atividade' in columns:
             rows = normalize_dates(rows, columns, ["data_inicio_atividade"])
 

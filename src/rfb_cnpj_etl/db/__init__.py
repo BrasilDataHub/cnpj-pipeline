@@ -2,5 +2,5 @@
 
 from .postgres_builder import PostgresBuilder
 from .postgres_loader import run_postgres_loader
-from .ibge_loader import carregar_tabelas_ibge
+from .ibge_loader import load_ibge_tables
 from .search_table import build_search_table

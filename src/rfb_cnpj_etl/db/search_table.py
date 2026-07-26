@@ -1,20 +1,20 @@
 # db/search_table.py
 
 """
-Construção da tabela de busca enxuta `busca_estabelecimento`.
+Construction of the lean `busca_estabelecimento` search table.
 
-Tabela desnormalizada estreita com uma linha por estabelecimento e apenas os
-campos filtráveis da busca do website, com os nomes normalizados via
-`unaccent(upper(...))` — o problema de acento é eliminado no nível do dado.
-Tamanho estimado: 10–12 GB (cabe em RAM na instância dedicada), tirando o
-disco do caminho crítico da busca textual.
+A narrow denormalized table with one row per establishment and only the
+filterable fields of the website search, with the names normalized via
+`unaccent(upper(...))` — the accent problem is eliminated at the data level.
+Estimated size: 10–12 GB (fits in RAM on the dedicated instance), taking the
+disk out of the critical path of the text search.
 
-Recriação a cada carga mensal pelo padrão build-and-swap: a tabela é
-construída como `busca_estabelecimento_new`, indexada e analisada fora do
-caminho de leitura, e trocada pela vigente numa única transação de RENAME —
-zero downtime de leitura para o website.
+Recreated on every monthly load through the build-and-swap pattern: the table
+is built as `busca_estabelecimento_new`, indexed and analyzed outside the read
+path, and swapped with the current one in a single RENAME transaction — zero
+read downtime for the website.
 
-Pode ser executado independentemente via: python etl.py db search
+Can be run standalone via: python etl.py db search
 """
 
 import time
@@ -26,9 +26,9 @@ from ..utils.logger import print_log
 SEARCH_TABLE = "busca_estabelecimento"
 BUILD_SUFFIX = "_new"
 
-# unaccent(upper(...)) exige a extensão unaccent (REQUIRED_EXTENSIONS).
-# A normalização é defensiva: o dado da RFB já é caixa alta sem acento,
-# mas a garantia passa a ser do schema, não da origem.
+# unaccent(upper(...)) requires the unaccent extension (REQUIRED_EXTENSIONS).
+# The normalization is defensive: the RFB data is already uppercase without
+# accents, but the guarantee now comes from the schema, not from the source.
 _SELECT_SOURCE = """
     SELECT
         est.cnpj_completo,
@@ -52,9 +52,9 @@ _SELECT_SOURCE = """
     LEFT JOIN public.empresa emp ON emp.cnpj_basico = est.cnpj_basico
 """
 
-# Índices finais da tabela de busca (nomes SEM o sufixo de build).
-# GIN trigram nas colunas de nome normalizadas (busca por substring) e
-# btrees compostos alinhados aos filtros âncora do website.
+# Final indexes of the search table (names WITHOUT the build suffix).
+# GIN trigram on the normalized name columns (substring search) and
+# composite btrees aligned with the website's anchor filters.
 SEARCH_TABLE_INDEXES = [
     {
         'name': 'idx_busca_razao_social_trgm',
@@ -81,12 +81,12 @@ def _pk_name(table: str) -> str:
 
 def build_search_table(postgres_config: dict) -> None:
     """
-    Constrói (ou reconstrói) a `busca_estabelecimento` com swap atômico.
+    Builds (or rebuilds) `busca_estabelecimento` with an atomic swap.
 
-    Etapas: CTAS UNLOGGED (rápido, sem WAL) → SET LOGGED (durabilidade) →
-    PK + índices → ANALYZE → transação única de DROP/RENAME. Idempotente:
-    restos de builds interrompidos são descartados no início e a troca
-    funciona com ou sem tabela vigente.
+    Steps: UNLOGGED CTAS (fast, no WAL) → SET LOGGED (durability) →
+    PK + indexes → ANALYZE → single DROP/RENAME transaction. Idempotent:
+    leftovers from interrupted builds are discarded at the start and the swap
+    works with or without a current table.
     """
     build_table = f"{SEARCH_TABLE}{BUILD_SUFFIX}"
     conn = None
@@ -98,7 +98,7 @@ def build_search_table(postgres_config: dict) -> None:
 
         print_log(f"CONSTRUINDO TABELA DE BUSCA '{SEARCH_TABLE}'...", level="task")
 
-        # Pré-condições: extensão unaccent e tabelas de origem
+        # Preconditions: unaccent extension and source tables
         cur.execute("SELECT 1 FROM pg_extension WHERE extname = 'unaccent';")
         if cur.fetchone() is None:
             raise RuntimeError(
@@ -109,17 +109,17 @@ def build_search_table(postgres_config: dict) -> None:
         if None in cur.fetchone():
             raise RuntimeError("Tabelas de origem (estabelecimento/empresa) não encontradas.")
 
-        # Descarta resto de build anterior interrompido
+        # Discards leftovers from a previous interrupted build
         cur.execute(f'DROP TABLE IF EXISTS public."{build_table}";')
 
-        # 1. CTAS sem WAL: a durabilidade vem do SET LOGGED logo em seguida
+        # 1. CTAS without WAL: durability comes from the SET LOGGED right after
         start = time.time()
         cur.execute(f'CREATE UNLOGGED TABLE public."{build_table}" AS {_SELECT_SOURCE};')
         rows = cur.rowcount
         print_log(f"  -> CTAS concluído: {rows:,} linhas ({time.time() - start:.1f}s)", level="docs")
 
-        # Validação: uma linha por estabelecimento (LEFT JOIN não multiplica
-        # nem perde linhas — empresa é PK em cnpj_basico)
+        # Validation: one row per establishment (the LEFT JOIN neither
+        # multiplies nor loses rows — empresa has a PK on cnpj_basico)
         cur.execute("SELECT count(*) FROM public.estabelecimento;")
         source_rows = cur.fetchone()[0]
         if rows != source_rows:
@@ -128,12 +128,12 @@ def build_search_table(postgres_config: dict) -> None:
                 f"{source_rows:,} em estabelecimento. Build abortado (a tabela vigente permanece)."
             )
 
-        # 2. Durabilidade antes de indexar (menos bytes reescritos)
+        # 2. Durability before indexing (fewer bytes rewritten)
         start = time.time()
         cur.execute(f'ALTER TABLE public."{build_table}" SET LOGGED;')
         print_log(f"  -> SET LOGGED ({time.time() - start:.1f}s)", level="docs")
 
-        # 3. PK + índices (a *_new não recebe leitura; CREATE INDEX simples)
+        # 3. PK + indexes (the *_new table takes no reads; plain CREATE INDEX)
         start = time.time()
         cur.execute(f'ALTER TABLE public."{build_table}" ADD PRIMARY KEY ("cnpj_completo");')
         print_log(f"  -> PK criada ({time.time() - start:.1f}s)", level="docs")
@@ -152,7 +152,7 @@ def build_search_table(postgres_config: dict) -> None:
 
         cur.execute(f'ANALYZE public."{build_table}";')
 
-        # 4. Swap atômico: leitores nunca veem estado intermediário
+        # 4. Atomic swap: readers never see an intermediate state
         conn.autocommit = False
         cur.execute(f'DROP TABLE IF EXISTS public."{SEARCH_TABLE}";')
         cur.execute(f'ALTER TABLE public."{build_table}" RENAME TO "{SEARCH_TABLE}";')

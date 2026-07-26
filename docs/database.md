@@ -3,6 +3,12 @@
 Este documento serve como referência da **estrutura atual do banco** (tabelas, colunas, índices e materialized views) e traz exemplos de consultas.
 A fonte da verdade é o schema programático (`src/rfb_cnpj_etl/db/schema.py`), os índices avançados (`src/rfb_cnpj_etl/db/advanced_indexes.py`) e os SQLs em `sql/materialized_views/`.
 
+> **Recarga destrói objetos derivados**: `db init` e `db load` recriam o schema
+> com `DROP TABLE ... CASCADE`, o que remove também as **Materialized Views** e
+> a tabela de busca `busca_estabelecimento` — ambas são recriadas nas etapas
+> finais do `complete`. A única tabela preservada é a `pipeline_stats`
+> (histórico de execuções).
+
 ## Estrutura do Banco de Dados
 
 ### Tabelas Principais (Carga CNPJ)
@@ -167,6 +173,12 @@ cada carga mensal por build-and-swap (`*_new` + `RENAME` em transação única).
 - **PK:** `cod_pais`
 - **Colunas:** `cod_pais` VARCHAR(3), `nome_pais` VARCHAR(60) NOT NULL
 
+> A tabela pode conter **linhas sintéticas**: além dos ~18 países extras
+> conhecidos que o `db patch` insere, qualquer código presente em
+> `estabelecimento`/`socio` mas ausente do PAISCSV do mês é absorvido
+> automaticamente com o nome `CODIGO NAO CONSTANTE NA TABELA RFB` — sem isso,
+> as FKs de país falhariam (incidente de 07/2026).
+
 #### `municipio_rfb`
 - **PK:** `cod_municipio`
 - **Colunas:** `cod_municipio` VARCHAR(7), `nome_municipio` VARCHAR(120) NOT NULL
@@ -220,15 +232,15 @@ cada carga mensal por build-and-swap (`*_new` + `RENAME` em transação única).
 #### `estabelecimento`
 - `idx_estab_empresa` (`cnpj_basico`)
 - `idx_estab_nome_fantasia` (`nome_fantasia`)
-- `idx_estab_cnae_principal` (`cod_cnae_principal`)
-- `idx_estab_data_inicio` (`data_inicio_atividade`)
 - `idx_estab_data_situacao` (`data_situacao_cadastral`)
 - `idx_estab_municipio` (`cod_municipio`)
 - `idx_estab_uf_municipio` (`uf`, `cod_municipio`)
-- `idx_estab_situacao` (`cod_situacao_cadastral`)
-- `idx_estab_regiao_ibge` (`cod_regiao_ibge`)
-- `idx_estab_estado_ibge` (`cod_estado_ibge`)
-- `idx_estab_cidade_ibge` (`cod_cidade_ibge`)
+
+> Seis índices simples (`idx_estab_cnae_principal`, `idx_estab_data_inicio`,
+> `idx_estab_situacao`, `idx_estab_regiao_ibge`, `idx_estab_estado_ibge`,
+> `idx_estab_cidade_ibge`) foram **removidos em 2026-07** por serem prefixos
+> exatos de índices compostos existentes ou terem seletividade baixa demais.
+> Justificativas e protocolo de remoção em produção: [index_cleanup](index_cleanup.md).
 
 #### `simples`
 - `idx_simples_opcoes` (`opcao_simples`, `opcao_mei`, `cnpj_basico`)
@@ -252,26 +264,26 @@ cada carga mensal por build-and-swap (`*_new` + `RENAME` em transação única).
 - `idx_ibge_cidade_estado` (`cod_estado_ibge`)
 - `idx_ibge_cidade_municipio` (`cod_municipio`)
 
-### Índices Avançados (opcionais, via `advanced_indexes.py`)
+### Índices Avançados (automáticos, via `advanced_indexes.py`)
+
+Criados automaticamente pelo `db index` (e pelo `db load`/`complete` sem
+`--skip-index`), junto com os básicos. São 40 índices, construídos **sem**
+`CONCURRENTLY` e em paralelo (ver [Configuração](configuration.md#criação-de-índices)).
 
 #### `estabelecimento`
 - `idx_estab_cep` (`cep`)
-- `idx_estab_ddd` (`ddd_telefone_1`)
 - `idx_estab_regiao_estado` (`cod_regiao_ibge`, `cod_estado_ibge`)
 - `idx_estab_cnae_estado` (`cod_cnae_principal`, `cod_estado_ibge`)
 - `idx_estab_cnae_cidade` (`cod_cnae_principal`, `cod_cidade_ibge`)
 - `idx_estab_data_inicio_brin` BRIN (`data_inicio_atividade`) WITH (pages_per_range = 32)
 - `idx_estab_ativas` (`cod_situacao_cadastral`) WHERE `cod_situacao_cadastral = '02'`
-- `idx_estab_matriz_filial` (`matriz_filial`)
 - `idx_estab_cidade_ativas_cnpj` (`cod_cidade_ibge`, `cnpj_completo`) WHERE `cod_situacao_cadastral = '02'`
 - `idx_estab_estado_ativas_cnpj` (`cod_estado_ibge`, `cnpj_completo`) WHERE `cod_situacao_cadastral = '02'`
 - `idx_estab_regiao_ativas_cnpj` (`cod_regiao_ibge`, `cnpj_completo`) WHERE `cod_situacao_cadastral = '02'`
 - `idx_estab_nome_fantasia_trgm` GIN (`nome_fantasia gin_trgm_ops`)
-- `idx_estab_nome_fantasia_prefix` (`nome_fantasia varchar_pattern_ops`)
 - `idx_estab_email` (`email`) WHERE `email IS NOT NULL AND email != ''`
 - `idx_estab_telefone` (`telefone_1`) WHERE `telefone_1 IS NOT NULL AND telefone_1 != ''`
 - `idx_estab_email_hash` HASH (`email`)
-- `idx_estab_cnpj_completo_hash` HASH (`cnpj_completo`)
 - `idx_estab_prospeccao` (`cod_estado_ibge`, `cod_cnae_principal`, `cod_situacao_cadastral`)
 - `idx_estab_local_cnae` (`cod_cidade_ibge`, `cod_cnae_principal`, `matriz_filial`)
 - `idx_estab_novos_estado` (`data_inicio_atividade`, `cod_estado_ibge`)
@@ -284,11 +296,18 @@ cada carga mensal por build-and-swap (`*_new` + `RENAME` em transação única).
 - `idx_estab_ddd1_covering` (`ddd_telefone_1`) INCLUDE (`cnpj_completo`, `cod_cidade_ibge`) WHERE `ddd_telefone_1 IS NOT NULL AND ddd_telefone_1 != ''`
 - `idx_estab_bairro_trgm` GIN (`bairro gin_trgm_ops`)
 - `idx_estab_email_prospeccao` (`cod_cidade_ibge`, `cnpj_completo`) WHERE `email IS NOT NULL AND email != '' AND email NOT ILIKE '%contab%'`
+- `idx_estab_estado_matriz_cnpj` (`cod_estado_ibge`, `matriz_filial`, `cnpj_basico`) — sitemaps: empresas por UF
+- `idx_estab_estado_cnae` (`cod_estado_ibge`, `cod_cnae_principal`) — sitemaps: agregação CNAE por estado
+- `idx_estab_estado_cidade_cnae` (`cod_estado_ibge`, `cod_cidade_ibge`, `cod_cnae_principal`) — sitemaps: agregação CNAE por cidade
+
+> Removidos em 2026-07 (duplicatas com collation C ou sem ganho mensurável):
+> `idx_estab_ddd`, `idx_estab_matriz_filial`, `idx_estab_nome_fantasia_prefix`,
+> `idx_estab_cnpj_completo_hash`, `idx_empresa_razao_social_prefix`,
+> `idx_socio_nome_prefix`. Ver [index_cleanup](index_cleanup.md).
 
 #### `empresa`
 - `idx_empresa_capital` (`capital_social`)
 - `idx_empresa_razao_social_trgm` GIN (`razao_social gin_trgm_ops`)
-- `idx_empresa_razao_social_prefix` (`razao_social varchar_pattern_ops`)
 - `idx_empresa_porte_cnpj` (`cod_porte`, `cnpj_basico`)
 - `idx_empresa_natureza_cnpj` (`cod_natureza_juridica`, `cnpj_basico`)
 
@@ -301,7 +320,6 @@ cada carga mensal por build-and-swap (`*_new` + `RENAME` em transação única).
 
 #### `socio`
 - `idx_socio_nome_trgm` GIN (`nome_socio gin_trgm_ops`)
-- `idx_socio_nome_prefix` (`nome_socio varchar_pattern_ops`)
 
 #### `simples`
 - `idx_simples_opcao_simples` (`cnpj_basico`) WHERE `opcao_simples = 'S'`

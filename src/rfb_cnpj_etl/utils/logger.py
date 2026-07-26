@@ -1,29 +1,29 @@
 # utils/logger.py
 
 """
-Logger para o projeto.
+Logger for the project.
 """
 
 from datetime import datetime
 import os
 import threading
 
-# lock para evitar conflito de prints em multithread
+# lock to avoid print conflicts in multithread
 print_lock = threading.Lock()
 
-# momento em que a aplicação começou (para calcular tempo decorrido)
+# moment when the application started (to compute elapsed time)
 start_time = datetime.now()
 
-# arquivo de log (opcional)
+# log file (optional)
 _log_file_handle = None
 _log_file_path = None
 
 
 def set_log_file(path: str) -> None:
     """
-    Define o arquivo de log para escrita (append).
+    Sets the log file for writing (append).
     :params:
-        path: caminho do arquivo de log
+        path: path of the log file
     """
     global _log_file_handle, _log_file_path
 
@@ -37,13 +37,13 @@ def set_log_file(path: str) -> None:
         _log_file_handle = open(path, "a", encoding="utf-8", buffering=1)
         _log_file_path = path
     except Exception as exc:
-        # evita recursão com print_log
+        # avoids recursion with print_log
         print(f"⚠️  Não foi possível abrir arquivo de log '{path}': {exc}")
 
 
 def get_timestamp():
     """
-    Retorna o timestamp atual e o tempo decorrido desde o início da aplicação.
+    Returns the current timestamp and the time elapsed since the application started.
     """
     now = datetime.now()
     elapsed = now - start_time
@@ -55,11 +55,11 @@ def get_timestamp():
 
 def print_log(msg: str, level: str = None, time: bool = True) -> None:
     """
-    Imprime uma mensagem no terminal.
+    Prints a message to the terminal.
     :params:
-        msg: mensagem a ser impressa
-        level: nível da mensagem (docs, warning, error, debug)
-        time: se True, imprime o tempo decorrido desde o início da aplicação
+        msg: message to be printed
+        level: message level (docs, warning, error, debug)
+        time: if True, prints the time elapsed since the application started
     :return: None
     """
     now, elapsed = get_timestamp()
@@ -91,5 +91,5 @@ def print_log(msg: str, level: str = None, time: bool = True) -> None:
             try:
                 _log_file_handle.write(formatted_msg + "\n")
             except Exception as exc:
-                # evita recursão e mantém stdout intacto
+                # avoids recursion and keeps stdout intact
                 print(f"⚠️  Falha ao escrever no log '{_log_file_path}': {exc}")
