@@ -237,7 +237,13 @@ class CNPJDownloadManager:
             self.file_urls.append(info["file_url"])  # adiciona o URL do arquivo
 
     # iniciar os downloads
-    def start_download_queue(self):
+    def start_download_queue(self, on_progress=None):
+        """Baixa a fila de arquivos.
+
+        :param on_progress: callback opcional chamado a cada arquivo concluído,
+            com (baixados, total, nome_do_arquivo). Usado pelo estado de
+            execução para publicar progresso no dashboard.
+        """
         CNPJDownloadTask.set_bar_width(self.max_desc)  # define a largura da barra de progresso
 
         queue_size = len(self.file_urls)  # total de downloads a serem realizados
@@ -296,6 +302,12 @@ class CNPJDownloadManager:
                     remaining_bar.set_description(f"{desc}")
 
                     remaining_bar.refresh()  # força atualização visual da barra
+
+                    if on_progress is not None:
+                        try:
+                            on_progress(remaining_bar.n, remaining_bar.total, task.filename)
+                        except Exception:
+                            pass   # instrumentação nunca interrompe o download
 
                 except Exception as e:
                     print_log(f"ERRO AO BAIXAR {task.filename}: {e}", level="error")

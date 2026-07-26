@@ -64,8 +64,16 @@ services:
       - ./data/downloads:/app/data/downloads
       # Volume para logs do ETL no host
       - ./data/logs:/app/data/logs
+      # Estado de execução (checkpoint/retomada). SEM este volume, o progresso
+      # some junto com o container e uma execução interrompida recomeça do
+      # zero — ver docs/observabilidade.md.
+      - ./data/state:/app/data/state
       # Volume para dados IBGE (somente leitura)
       - ./data/locations:/app/data/locations:ro
+    ports:
+      # Dashboard opcional (`--serve --host 0.0.0.0`). Sem `--serve` a porta
+      # simplesmente não é usada.
+      - '${FORWARD_DASHBOARD_PORT:-3010}:${PIPELINE_PORT:-3010}'
     environment:
       # Conexão com PostgreSQL (usa o nome do serviço como host)
       POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
@@ -76,6 +84,14 @@ services:
       # Caminhos dentro do container
       DOWNLOAD_PATH: ${DOWNLOAD_PATH:-/app/data/downloads}
       IBGE_CSV_DIR: ${IBGE_CSV_DIR:-/app/data/locations}
+      # Observabilidade (todas opcionais — ver docs/observabilidade.md)
+      PIPELINE_STATE_DIR: ${PIPELINE_STATE_DIR:-/app/data/state}
+      PIPELINE_PORT: ${PIPELINE_PORT:-3010}
+      PIPELINE_WEBHOOK_URL: ${PIPELINE_WEBHOOK_URL:-}
+      # Senha do dashboard (Basic Auth). Vazio => o pipeline gera uma e
+      # mostra no log a cada execução.
+      PIPELINE_DASHBOARD_PASSWORD: ${PIPELINE_DASHBOARD_PASSWORD:-}
+      PIPELINE_MAX_ATTEMPTS: ${PIPELINE_MAX_ATTEMPTS:-3}
     networks:
       - rfb-cnpj-network
     # Stdin/tty para barras de progresso interativas
@@ -95,13 +111,14 @@ services:
     volumes:
       - ./data/downloads:/app/data/downloads
       - ./data/logs:/app/data/logs
+      - ./data/state:/app/data/state
     command:
       - /bin/sh
       - -c
       - |
-        mkdir -p /app/data/downloads /app/data/logs && \
-        chown -R ${ETL_UID:-1000}:${ETL_GID:-1000} /app/data/downloads /app/data/logs && \
-        chmod -R 0775 /app/data/downloads /app/data/logs
+        mkdir -p /app/data/downloads /app/data/logs /app/data/state && \
+        chown -R ${ETL_UID:-1000}:${ETL_GID:-1000} /app/data/downloads /app/data/logs /app/data/state && \
+        chmod -R 0775 /app/data/downloads /app/data/logs /app/data/state
     restart: "no"
 
 networks:

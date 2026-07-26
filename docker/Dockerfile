@@ -46,13 +46,20 @@ COPY sql/ ./sql/
 # Copiar dados estáticos (CSVs do IBGE)
 COPY data/locations/ ./data/locations/
 
-# Criar diretório para downloads (será sobrescrito pelo volume)
-RUN mkdir -p /app/data/downloads
+# Criar diretórios de dados (serão sobrescritos pelos volumes).
+# `state` guarda o checkpoint de retomada: sem montá-lo como volume, o
+# progresso morre junto com o container (ver docs/observabilidade.md).
+RUN mkdir -p /app/data/downloads /app/data/logs /app/data/state
 
 # Usuário não-root para segurança (opcional, mas recomendado)
 RUN useradd --create-home --shell /bin/bash etluser \
     && chown -R etluser:etluser /app
 USER etluser
+
+# Porta do dashboard opcional (`--serve`). EXPOSE é documental: para acessar
+# do host ainda é preciso publicar (`-p 3010:3010`) E pedir que o servidor
+# ouça fora do loopback (`--host 0.0.0.0`).
+EXPOSE 3010
 
 # Entrypoint para o CLI do ETL
 ENTRYPOINT ["python", "etl.py"]

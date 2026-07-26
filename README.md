@@ -53,11 +53,19 @@ Variáveis lidas pelo pipeline (todas opcionais; os valores abaixo são os defau
 | `IBGE_CSV_DIR` | Diretório dos CSVs do IBGE | `data/locations` |
 | `RFB_WEBDAV_URL` | Endpoint WebDAV da RFB | URL oficial embutida |
 | `LOG_FILE` | Caminho do arquivo de log (aceita `{date}`) | `data/logs/etl-YYYY-MM-DD.log` |
+| `PIPELINE_STATE_DIR` | Diretório do estado de execução (retomada) | `data/state` |
+| `PIPELINE_WEBHOOK_URL` | Destino das notificações por etapa | — (desligado) |
+| `PIPELINE_PORT` | Porta do dashboard (`--serve`) | `3010` |
+| `PIPELINE_DASHBOARD_PASSWORD` | Senha do dashboard (Basic Auth) | gerada a cada execução |
+| `PIPELINE_DASHBOARD_USER` | Usuário do dashboard | `pipeline` |
+| `PIPELINE_REFRESH_SECONDS` | Intervalo inicial do polling da página | `6` |
+| `PIPELINE_MAX_ATTEMPTS` | Tentativas por etapa antes de exigir intervenção | `3` |
 
 Variáveis consumidas apenas pelo `docker-compose.yaml` (não pelo código Python):
 `FORWARD_DB_PORT`, `DADOS_READ_PASSWORD`, `PG_SHARED_BUFFERS`, `PG_EFFECTIVE_CACHE_SIZE`,
 `PG_WORK_MEM`, `PG_MAINTENANCE_WORK_MEM`, `PG_MAX_WAL_SIZE`, `PG_RANDOM_PAGE_COST`,
-`PG_SHM_SIZE`, `PG_MEMORY_LIMIT`, `ETL_UID`, `ETL_GID`, `IMAGE_TAG`.
+`PG_SHM_SIZE`, `PG_MEMORY_LIMIT`, `ETL_UID`, `ETL_GID`, `IMAGE_TAG`,
+`FORWARD_DASHBOARD_PORT`.
 
 > Dentro do container o arquivo `.env` **não** existe (é excluído pelo `.dockerignore`):
 > a configuração precisa chegar por `-e`, `--env-file` ou `environment:`.
@@ -111,6 +119,7 @@ docker run --rm \
   -e POSTGRES_DBNAME=dados_cnpj \
   -v "$PWD/data/downloads:/app/data/downloads" \
   -v "$PWD/data/logs:/app/data/logs" \
+  -v "$PWD/data/state:/app/data/state" \
   ghcr.io/brasildatahub/cnpj-pipeline:latest \
   complete --month 07/2026 --parallel
 
@@ -124,13 +133,32 @@ docker run --rm \
 docker run --rm --env-file .env \
   -v "$PWD/data/downloads:/app/data/downloads" \
   -v "$PWD/data/logs:/app/data/logs" \
+  -v "$PWD/data/state:/app/data/state" \
   ghcr.io/brasildatahub/cnpj-pipeline:latest \
   db views refresh --concurrent
+
+# Com dashboard de acompanhamento e webhooks
+#   -p publica a porta E --host 0.0.0.0 faz o servidor ouvir fora do loopback:
+#   faltando qualquer um dos dois, o acesso pelo host não funciona.
+docker run -d --name cnpj-run --env-file .env \
+  -p 3010:3010 \
+  -v "$PWD/data/downloads:/app/data/downloads" \
+  -v "$PWD/data/logs:/app/data/logs" \
+  -v "$PWD/data/state:/app/data/state" \
+  -e PIPELINE_WEBHOOK_URL=https://n8n.exemplo.com/webhook/cnpj \
+  ghcr.io/brasildatahub/cnpj-pipeline:latest \
+  complete --month 07/2026 --parallel --serve --host 0.0.0.0
+# depois: acompanhe em http://localhost:3010
 
 # Listar meses disponíveis / ver ajuda
 docker run --rm ghcr.io/brasildatahub/cnpj-pipeline:latest get-availables
 docker run --rm ghcr.io/brasildatahub/cnpj-pipeline:latest --help
 ```
+
+> **Dashboard e webhooks em container** têm três pegadinhas — volume de estado,
+> publicação de porta e alcance da URL do webhook a partir de dentro do
+> container. Todas cobertas em
+> [Observabilidade — Uso com Docker](docs/observabilidade.md#uso-com-docker).
 
 **Tags disponíveis:** `latest`, `sha-<commit>`, e versões semânticas (`1.2.3`, `1.2`, `1`)
 quando há release. Para fixar uma versão em produção, prefira `sha-<commit>` ou a tag semver.
@@ -138,15 +166,20 @@ quando há release. Para fixar uma versão em produção, prefira `sha-<commit>`
 **Monte as subpastas, nunca `/app/data` inteiro:** os CSVs do IBGE
 (`data/locations/`) vêm dentro da imagem. Um `-v "$PWD/data:/app/data"` cobre
 esse diretório com a pasta do host e a carga de localidades falha por falta dos
-arquivos. Monte apenas `data/downloads` e `data/logs`, como nos exemplos acima.
+arquivos. Monte apenas `data/downloads`, `data/logs` e `data/state`, como nos
+exemplos acima.
+
+**O volume `data/state` é o que permite retomar.** Ele guarda o checkpoint de
+cada etapa; sem montá-lo, o progresso morre com o container e uma execução
+interrompida recomeça do zero.
 
 **Permissões dos volumes:** a imagem roda como usuário não-root (`etluser`, uid 1000).
 Se os diretórios do host pertencerem ao `root`, o container não conseguirá escrever —
 o sintoma é `Permission denied` no arquivo de log e em todos os downloads:
 
 ```bash
-mkdir -p data/downloads data/logs
-sudo chown -R 1000:1000 data/downloads data/logs
+mkdir -p data/downloads data/logs data/state
+sudo chown -R 1000:1000 data/downloads data/logs data/state
 ```
 
 ### Execução em segundo plano
@@ -160,6 +193,7 @@ SSH), use `-d` e acompanhe pelos logs:
 docker run -d --name cnpj-run-2026-07 --env-file .env \
   -v "$PWD/data/downloads:/app/data/downloads" \
   -v "$PWD/data/logs:/app/data/logs" \
+  -v "$PWD/data/state:/app/data/state" \
   ghcr.io/brasildatahub/cnpj-pipeline:latest \
   complete --month 07/2026 --parallel
 
@@ -246,6 +280,23 @@ docker compose build etl
 
 Opção global disponível em todos os comandos: `--log-file <caminho>` (aceita o
 placeholder `{date}`; tem prioridade sobre a variável `LOG_FILE`).
+
+As flags de **observabilidade** valem em `download`, `complete` e em todos os
+subcomandos `db` — detalhes em
+[Observabilidade e retomada](docs/observabilidade.md):
+
+| Flag | Variável | Padrão | O que faz |
+|---|---|---|---|
+| `--force` | — | desligado | ignora o estado e reexecuta tudo (backup `.bak` do anterior) |
+| `--no-state` | — | desligado | desliga o checkpoint/retomada |
+| `--reference-period` | — | inferido | período dos dados (`AAAA-MM`), para subcomandos sem `--month` |
+| `--max-attempts` | `PIPELINE_MAX_ATTEMPTS` | `3` | tentativas por etapa antes de exigir intervenção |
+| `--serve` | — | desligado | sobe o dashboard web somente leitura |
+| `--port` | `PIPELINE_PORT` | `3010` | porta do dashboard |
+| `--host` | — | `127.0.0.1` | interface do dashboard (`0.0.0.0` em container) |
+| `--dashboard-password` | `PIPELINE_DASHBOARD_PASSWORD` | gerada | senha do dashboard (Basic Auth) |
+| `--no-auth` | — | desligado | serve o dashboard sem autenticação |
+| `--webhook-url` | `PIPELINE_WEBHOOK_URL` | — | notificações HTTP por etapa |
 
 | Comando | Argumentos | O que faz |
 |---|---|---|
@@ -343,6 +394,27 @@ alto (≥4 GB) reduz checkpoints durante a conversão. A etapa é idempotente
 (só converte o que ainda é UNLOGGED) e pode ser executada isoladamente com
 `python etl.py db logged`.
 
+## Retomada de execuções interrompidas
+
+O pipeline grava um arquivo de estado por **período de referência dos dados**
+(`data/state/pipeline_state_2026-07.json`) e marca cada etapa como concluída.
+Se uma execução for interrompida, basta reexecutar o mesmo comando: as etapas
+já concluídas são puladas e a carga continua do ponto de falha.
+
+```bash
+python etl.py complete --month 07/2026          # retoma automaticamente
+python etl.py complete --month 07/2026 --force  # ignora o estado e refaz tudo
+python etl.py complete --month 07/2026 --serve  # acompanha em http://localhost:3010
+```
+
+A janela é definida pelo **mês dos arquivos da RFB**, não pela data de execução:
+um pipeline iniciado dia 25 e retomado dia 26 continua no mesmo estado. Cada
+execução também é registrada na tabela `pipeline_stats` (duração, registros
+inseridos, arquivos baixados), que **sobrevive à recarga** das tabelas.
+
+Detalhes de schema, webhooks e dashboard:
+[Observabilidade e retomada](docs/observabilidade.md).
+
 ## Documentação
 
 | Documento | Descrição |
@@ -351,6 +423,7 @@ alto (≥4 GB) reduz checkpoints durante a conversão. A etapa é idempotente
 | [Referência de Comandos](docs/commands.md) | Todos os comandos, flags e execução por etapas |
 | [Configuração](docs/configuration.md) | Personalização, variáveis de ambiente, scripts SQL |
 | [Guia do Banco de Dados](docs/database.md) | Estrutura do banco, índices, MVs e consultas |
+| [Observabilidade e retomada](docs/observabilidade.md) | Estado, `--force`, dashboard, webhooks e `pipeline_stats` |
 
 ## Estrutura do Projeto
 
@@ -364,11 +437,17 @@ cnpj-pipeline/
 │   ├── config.py          # Configurações
 │   ├── cnpj_data/         # Download e scraping
 │   ├── db/                # Schema e loaders
+│   │   └── pipeline_stats.py # Estatísticas por execução
 │   └── utils/             # Utilitários
+│       ├── run_state.py   # Estado/checkpoint e retomada
+│       ├── dashboard.py   # Dashboard web (somente leitura)
+│       └── webhook.py     # Notificações por etapa
+├── tests/                 # Testes de observabilidade e retomada
 ├── docs/                  # Documentação detalhada
 ├── sql/                   # Scripts SQL auxiliares
 │   └── materialized_views/ # Scripts de MVs
-├── data/                  # Downloads, logs e dados IBGE
+├── data/                  # Downloads, logs, estado e dados IBGE
+│   └── state/             # pipeline_state_AAAA-MM.json
 ├── docker/
 │   └── Dockerfile         # Imagem do pipeline
 ├── docker-compose.yaml

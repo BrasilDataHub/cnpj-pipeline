@@ -49,6 +49,9 @@ def _make_path_from_env(value: str, default: Path) -> Path:
 
 DOWNLOAD_DIR = _make_path_from_env(os.getenv("DOWNLOAD_PATH"), DATA_DIR / "downloads")
 IBGE_CSV_DIR = _make_path_from_env(os.getenv("IBGE_CSV_DIR"), DATA_DIR / "locations")
+# Estado de execução (checkpoint/retomada). Um JSON por período de referência
+# dos dados — ver utils/run_state.py.
+STATE_DIR = _make_path_from_env(os.getenv("PIPELINE_STATE_DIR"), DATA_DIR / "state")
 IBGE_REGIOES_CSV = IBGE_CSV_DIR / "regions.csv"
 IBGE_ESTADOS_CSV = IBGE_CSV_DIR / "states.csv"
 IBGE_CIDADES_CSV = IBGE_CSV_DIR / "cities.csv"
@@ -103,6 +106,27 @@ BROWSER_AGENTS = [  # lista de user‑agents rotativos para as requisições HTT
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/15.1 Safari/605.1.15",
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/103.0.0.0 Safari/537.36",
 ]
+
+# ---------------------------------------------------------------------------
+# OBSERVABILIDADE (estado, dashboard, webhooks)
+# ---------------------------------------------------------------------------
+# Tabela de estatísticas por execução. Preservada pelo drop_tables() — o
+# histórico de execuções não pode ser apagado por uma recarga.
+PIPELINE_STATS_TABLE = "pipeline_stats"
+
+# Dashboard somente leitura. 3010 evita colisão com as portas comuns de dev
+# (3000, 8000, 8080).
+DASHBOARD_DEFAULT_PORT = int(os.getenv("PIPELINE_PORT", 3010))
+# Intervalo inicial do polling; ajustável na própria página (persistido no
+# localStorage do navegador).
+DASHBOARD_REFRESH_SECONDS = int(os.getenv("PIPELINE_REFRESH_SECONDS", 6))
+# Basic Auth: usuário fixo por padrão — o que importa é a senha, informada em
+# --dashboard-password/PIPELINE_DASHBOARD_PASSWORD ou gerada a cada execução.
+DASHBOARD_USER = os.getenv("PIPELINE_DASHBOARD_USER", "pipeline")
+DASHBOARD_PASSWORD = os.getenv("PIPELINE_DASHBOARD_PASSWORD") or None
+
+# Número de tentativas por etapa antes de exigir intervenção (--max-attempts).
+MAX_STEP_ATTEMPTS = int(os.getenv("PIPELINE_MAX_ATTEMPTS", 3))
 
 # ---------------------------------------------------------------------------
 # PRINT_LOG

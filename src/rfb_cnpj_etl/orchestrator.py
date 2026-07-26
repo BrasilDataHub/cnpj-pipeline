@@ -10,6 +10,19 @@ from .cnpj_data import CNPJDataScraper
 from .db import PostgresBuilder, run_postgres_loader, carregar_tabelas_ibge, build_search_table
 from .utils.logger import print_log
 from .utils.zip_metadata import validate_zip_files, estimate_total_lines_from_size
+from .utils.run_state import (
+    run_step,
+    STEP_VALIDACAO,
+    STEP_SCHEMA,
+    STEP_CARGA,
+    STEP_PATCHES,
+    STEP_LOGGED,
+    STEP_PK,
+    STEP_INDICES,
+    STEP_FK,
+    STEP_BUSCA,
+    STEP_VIEWS,
+)
 from .config import (
     DEFAULT_PARALLEL,
     DEFAULT_LOW_MEMORY,
@@ -28,7 +41,8 @@ def run_orchestrator(
         parallel: bool = DEFAULT_PARALLEL,
         low_memory: bool = DEFAULT_LOW_MEMORY,
         only_data: bool = False,
-        concurrent: bool = False
+        concurrent: bool = False,
+        state=None
 ):
     """
     Orquestração da carga no banco de dados PostgreSQL.
@@ -56,6 +70,10 @@ def run_orchestrator(
         low_memory: se deve usar baixa memória para processamento.
         only_data: se True, carrega apenas dados sem executar patch/pk/index/fk.
         concurrent: se True, usa REFRESH CONCURRENTLY para views (requer índice único).
+        state: RunState opcional para checkpoint/retomada. Quando None (padrão),
+               as etapas executam exatamente como antes, sem rastreamento.
+
+    :return: dict de métricas da execução (ex.: {"records_inserted": 218380000}).
     """
     print_log("INICIANDO TAREFAS DO BANCO DE DADOS...", level="start")
 
@@ -74,20 +92,23 @@ def run_orchestrator(
             files_dir = os.path.join(DOWNLOAD_DIR, folder)
 
         # validar dos arquivos na pasta
-        try:
-            if not skip_validation and not validate_zip_files(month_year, files_dir):
-                print_log("EXECUÇÃO INTERROMPIDA. VERIFIQUE OS ARQUIVOS NO DIRETÓRIO LOCAL.", level="error")
-                raise ValueError("Validação dos arquivos ZIP falhou.")
-        except FileNotFoundError:
-            hint = (
-                f"PASTA NÃO ENCONTRADA PARA {month_year}: {files_dir}. "
-                f"Baixe os arquivos antes de carregar: "
-                f"`python etl.py download --month {month_year}` "
-                f"ou use `python etl.py complete --month {month_year}`. "
-                f"Para outro caminho, passe --download-dir."
-            )
-            print_log(hint, level="error")
-            raise ValueError(hint)
+        def _validar_arquivos():
+            try:
+                if not skip_validation and not validate_zip_files(month_year, files_dir):
+                    print_log("EXECUÇÃO INTERROMPIDA. VERIFIQUE OS ARQUIVOS NO DIRETÓRIO LOCAL.", level="error")
+                    raise ValueError("Validação dos arquivos ZIP falhou.")
+            except FileNotFoundError:
+                hint = (
+                    f"PASTA NÃO ENCONTRADA PARA {month_year}: {files_dir}. "
+                    f"Baixe os arquivos antes de carregar: "
+                    f"`python etl.py download --month {month_year}` "
+                    f"ou use `python etl.py complete --month {month_year}`. "
+                    f"Para outro caminho, passe --download-dir."
+                )
+                print_log(hint, level="error")
+                raise ValueError(hint)
+
+        run_step(state, STEP_VALIDACAO, _validar_arquivos)
 
         # estimar linhas totais para controlar o progresso
         estimated_lines = estimate_total_lines_from_size(files_dir)
@@ -98,84 +119,105 @@ def run_orchestrator(
         postgres_config["database"] = db_name
     builder = PostgresBuilder(config=postgres_config)
 
+    # Métricas devolvidas ao chamador para alimentar `pipeline_stats`.
+    metricas = {"records_inserted": None}
+
+    def _inicializar_schema():
+        builder.initialize_schema()
+        carregar_tabelas_ibge(postgres_config=postgres_config)
+
+    def _carregar_dados():
+        # Publica no estado qual tabela/arquivo está sendo carregado e o
+        # avanço — é o que o dashboard mostra dentro da etapa `carga_dados`.
+        def _progresso(tabela, arquivo, inseridos, total):
+            if state is None:
+                return
+            pct = round(inseridos / total * 100, 1) if total else None
+            state.progress(
+                STEP_CARGA,
+                tabela_atual=tabela,
+                arquivo_atual=os.path.basename(arquivo or ""),
+                records_inserted=int(inseridos),
+                records_total=int(total or 0),
+                percentual=pct,
+            )
+
+        return run_postgres_loader(
+            files_dir=files_dir,
+            postgres_config=postgres_config,
+            total_records=estimated_lines,
+            parallel=parallel,
+            low_memory=low_memory,
+            on_progress=_progresso,
+        )
+
     # =========================================================================
     # ETAPA 1: Inicialização do schema (init ou load)
     # =========================================================================
     if command in ("init", "load"):
-        builder.initialize_schema()
-        carregar_tabelas_ibge(postgres_config=postgres_config)
+        run_step(state, STEP_SCHEMA, _inicializar_schema)
 
     # =========================================================================
     # ETAPA 2: Carga dos dados (load)
     # =========================================================================
     if command == "load":
-        run_postgres_loader(
-            files_dir=files_dir,
-            postgres_config=postgres_config,
-            total_records=estimated_lines,
-            parallel=parallel,
-            low_memory=low_memory
+        inseridos = run_step(
+            state, STEP_CARGA, _carregar_dados,
+            metadata_fn=lambda total: {"records_inserted": int(total or 0)}
         )
+        if inseridos is not None:
+            metricas["records_inserted"] = int(inseridos)
 
     # =========================================================================
     # ETAPA 3: Aplicar correções estáticas (patch ou load sem --only-data)
     # =========================================================================
-    if command == "patch":
-        builder.apply_patches()
-    elif command == "load" and not only_data:
-        builder.apply_patches()
+    if command == "patch" or (command == "load" and not only_data):
+        run_step(state, STEP_PATCHES, builder.apply_patches)
 
     # =========================================================================
     # ETAPA 3.5: Converter tabelas para LOGGED (logged ou load sem --only-data)
     # Antes de PKs/índices: com menos relações, a reescrita com WAL é menor.
     # UNLOGGED não sobrevive a crash — sem esta etapa, um crash trunca a base.
     # =========================================================================
-    if command == "logged":
-        builder.set_tables_logged()
-    elif command == "load" and not only_data:
-        builder.set_tables_logged()
+    if command == "logged" or (command == "load" and not only_data):
+        run_step(state, STEP_LOGGED, builder.set_tables_logged)
 
     # =========================================================================
     # ETAPA 4: Criar chaves primárias (pk ou load sem --only-data)
     # =========================================================================
-    if command == "pk":
-        builder.add_primary_keys()
-    elif command == "load" and not only_data:
-        builder.add_primary_keys()
+    if command == "pk" or (command == "load" and not only_data):
+        run_step(state, STEP_PK, builder.add_primary_keys)
 
     # =========================================================================
     # ETAPA 5: Criar índices (index ou load sem --only-data e sem --skip-index)
     # =========================================================================
-    if command == "index":
-        builder.create_indexes()
-    elif command == "load" and not only_data and not skip_indexes:
-        builder.create_indexes()
+    if command == "index" or (command == "load" and not only_data and not skip_indexes):
+        run_step(state, STEP_INDICES, builder.create_indexes)
 
     # =========================================================================
     # ETAPA 6: Criar chaves estrangeiras (fk ou load sem --only-data)
     # =========================================================================
-    if command == "fk":
-        builder.enable_foreign_keys()
-    elif command == "load" and not only_data:
-        builder.enable_foreign_keys()
+    if command == "fk" or (command == "load" and not only_data):
+        run_step(state, STEP_FK, builder.enable_foreign_keys)
 
     # =========================================================================
     # ETAPA 6.5: Tabela de busca enxuta (search ou load sem --only-data)
     # Pós-carga: depende dos dados finais de estabelecimento/empresa e da
     # extensão unaccent. Build-and-swap — leitura nunca fica indisponível.
     # =========================================================================
-    if command == "search":
-        build_search_table(postgres_config)
-    elif command == "load" and not only_data:
-        build_search_table(postgres_config)
+    if command == "search" or (command == "load" and not only_data):
+        run_step(state, STEP_BUSCA, lambda: build_search_table(postgres_config))
 
     # =========================================================================
     # ETAPA 7: Materialized Views (comandos opcionais)
     # =========================================================================
     if command == "views-create":
-        builder.create_materialized_views()
+        run_step(state, STEP_VIEWS, builder.create_materialized_views)
 
     if command == "views-refresh":
+        # Refresh não é etapa de construção: não entra no estado, porque
+        # reexecutá-lo é sempre válido e não há o que "retomar".
         builder.refresh_materialized_views(concurrent=concurrent)
 
     print_log(f"EXECUÇÃO FINALIZADA | POSTGRES | {month_year or command}", level="done")
+    return metricas

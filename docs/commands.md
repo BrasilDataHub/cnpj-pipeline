@@ -52,6 +52,44 @@ Estas opções funcionam com **todos** os comandos.
 
 ---
 
+## Opções de Observabilidade
+
+Disponíveis em `download`, `complete` e em **todos** os subcomandos `db`.
+Guia completo: [Observabilidade e retomada](observabilidade.md).
+
+| Flag | Tipo | Padrão | Descrição |
+|------|------|--------|-----------|
+| `--force` / `--force-restart` | `flag` | desligado | Ignora o estado do período e reexecuta tudo; o estado anterior vira `.bak-<timestamp>` |
+| `--no-state` | `flag` | desligado | Desliga o checkpoint/retomada (não lê nem grava o arquivo de estado) |
+| `--reference-period` | `str` | inferido | Período dos dados (`AAAA-MM` ou `MM/AAAA`), para subcomandos sem `--month` |
+| `--max-attempts` | `int` | `3` | Tentativas por etapa antes de exigir intervenção (`0` = ilimitado) |
+| `--serve` | `flag` | desligado | Sobe o dashboard web somente leitura durante a execução |
+| `--port` | `int` | `3010` | Porta do dashboard |
+| `--host` | `str` | `127.0.0.1` | Interface do dashboard (use `0.0.0.0` em container) |
+| `--dashboard-password` | `str` | gerada | Senha do dashboard (Basic Auth); se omitida, é gerada e mostrada no log |
+| `--dashboard-user` | `str` | `pipeline` | Usuário do dashboard |
+| `--no-auth` | `flag` | desligado | Serve o dashboard sem autenticação (rede confiável) |
+| `--webhook-url` | `url` | — | Notificações HTTP por etapa |
+
+**Retomada é o comportamento padrão.** Reexecutar o mesmo comando após uma
+interrupção pula as etapas já concluídas:
+
+```bash
+# Interrompeu na etapa de views? Basta repetir — o resto é pulado.
+python etl.py complete --month 07/2026
+
+# Acompanhar pelo navegador e notificar um endpoint a cada etapa
+python etl.py complete --month 07/2026 \
+    --serve --port 3010 \
+    --webhook-url https://exemplo.com/hook
+```
+
+**Variáveis equivalentes:** `PIPELINE_WEBHOOK_URL`, `PIPELINE_PORT`,
+`PIPELINE_MAX_ATTEMPTS`, `PIPELINE_STATE_DIR`, `PIPELINE_DASHBOARD_PASSWORD`,
+`PIPELINE_DASHBOARD_USER`, `PIPELINE_REFRESH_SECONDS`. As flags têm prioridade.
+
+---
+
 ## Comandos de Consulta
 
 ```bash

@@ -20,6 +20,11 @@ from ..db.advanced_indexes import (
 )
 from ..utils.db_patch import apply_static_fixes
 from ..utils.logger import print_log
+from ..config import PIPELINE_STATS_TABLE
+
+# Tabelas de metadados que drop_tables() não pode remover: guardam o histórico
+# de execuções e são independentes dos dados da RFB.
+PRESERVED_TABLES = {PIPELINE_STATS_TABLE}
 
 
 class PostgresBuilder:
@@ -88,12 +93,20 @@ class PostgresBuilder:
             raise
 
     def drop_tables(self):
+        """Remove as tabelas anteriores, preservando as de metadados.
+
+        `pipeline_stats` guarda o histórico de execuções e precisa sobreviver
+        a uma recarga — sem esta exceção, o drop varreria `pg_tables` inteiro
+        e apagaria justamente o registro do que já rodou.
+        """
         try:
             conn = self._connect()
             conn.autocommit = True
             cur = conn.cursor()
             cur.execute("SELECT tablename FROM pg_tables WHERE schemaname = 'public';")
             for (table_name,) in cur.fetchall():
+                if table_name in PRESERVED_TABLES:
+                    continue
                 cur.execute(f'DROP TABLE IF EXISTS "{table_name}" CASCADE;')
             conn.close()
             print_log("TABELAS ANTERIORES REMOVIDAS", level="docs")

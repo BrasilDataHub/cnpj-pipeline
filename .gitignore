@@ -9,5 +9,7 @@ debug/
 docker/volumes
 data/downloads
 data/logs
+# estado de execução (gerado pelo pipeline; um JSON por período de referência)
+data/state
 system/
 .env

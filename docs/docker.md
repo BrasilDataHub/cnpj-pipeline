@@ -114,6 +114,7 @@ docker rm cnpj-run-2026-07
 docker run -d --name cnpj-run-2026-07 --env-file .env \
   -v "$PWD/data/downloads:/app/data/downloads" \
   -v "$PWD/data/logs:/app/data/logs" \
+  -v "$PWD/data/state:/app/data/state" \
   ghcr.io/brasildatahub/cnpj-pipeline:latest \
   complete --month 07/2026 --parallel
 
@@ -239,10 +240,16 @@ docker container prune                                        # remove TODOS os 
 |------|-----------|-----------|
 | `./data/downloads` | `/app/data/downloads` | Arquivos ZIP baixados (~6GB) |
 | `./data/logs` | `/app/data/logs` | Logs do ETL (rotação diária simples) |
+| `./data/state` | `/app/data/state` | **Estado de execução (checkpoint/retomada)** |
 | `./data/locations` | `/app/data/locations` | CSVs do IBGE (somente leitura) |
 | `./docker/volumes/postgresql` | `/var/lib/postgresql/data` | Dados do PostgreSQL (~40GB) |
 
 > Os downloads são persistidos no host, permitindo reutilização entre execuções.
+
+> ⚠️ **`./data/state` é o que torna a retomada possível.** Sem esse volume, o
+> checkpoint morre junto com o container e uma execução interrompida recomeça
+> do zero. Detalhes e verificação:
+> [Observabilidade — Uso com Docker](observabilidade.md#uso-com-docker).
 
 > **Nunca monte `/app/data` inteiro** (`-v ./data:/app/data`): os CSVs do IBGE
 > vêm dentro da imagem em `/app/data/locations` e seriam encobertos pela pasta
@@ -251,14 +258,16 @@ docker container prune                                        # remove TODOS os 
 ## Permissões de Volumes (Importante)
 
 A imagem do ETL roda como usuário não-root. Em ambientes Docker, se os diretórios do host
-forem criados como `root`, o container não conseguirá escrever em `/app/data/downloads` e `/app/data/logs`.
+forem criados como `root`, o container não conseguirá escrever em
+`/app/data/downloads`, `/app/data/logs` e `/app/data/state`.
 
 Soluções recomendadas:
 
 ```bash
 # Ajuste rápido no host (substitua 1000 se necessário)
-sudo chown -R 1000:1000 ./data/downloads ./data/logs
-sudo chmod -R 0775 ./data/downloads ./data/logs
+mkdir -p ./data/downloads ./data/logs ./data/state
+sudo chown -R 1000:1000 ./data/downloads ./data/logs ./data/state
+sudo chmod -R 0775 ./data/downloads ./data/logs ./data/state
 ```
 
 Ou rode o init service que já existe no `docker-compose.yaml` (cria pastas e ajusta permissões):
@@ -266,6 +275,50 @@ Ou rode o init service que já existe no `docker-compose.yaml` (cria pastas e aj
 ```bash
 ETL_UID=$(id -u) ETL_GID=$(id -g) docker compose up --abort-on-container-exit etl-init-permissions
 ```
+
+## Dashboard e Webhooks em Container
+
+Guia completo: [Observabilidade — Uso com Docker](observabilidade.md#uso-com-docker).
+O essencial:
+
+**Dashboard — precisa das duas coisas.** Publicar a porta *e* mandar o servidor
+ouvir fora do loopback (o padrão é `127.0.0.1`, que de dentro do container não
+é alcançável do host):
+
+```bash
+docker run -d --name cnpj-run \
+  -p 3010:3010 \
+  --env-file .env \
+  -v "$PWD/data/downloads:/app/data/downloads" \
+  -v "$PWD/data/logs:/app/data/logs" \
+  -v "$PWD/data/state:/app/data/state" \
+  ghcr.io/brasildatahub/cnpj-pipeline:latest \
+  complete --month 07/2026 --parallel --serve --host 0.0.0.0
+```
+
+Com Compose, `docker compose run` exige `--service-ports` para publicar:
+
+```bash
+docker compose run --rm --service-ports etl \
+    complete --month 07/2026 --parallel --serve --host 0.0.0.0
+```
+
+> ⚠️ Com `--network host`, o `-p` é ignorado e `--host 0.0.0.0` expõe o
+> dashboard em **todas** as interfaces — inclusive a pública. Ele não tem
+> autenticação. Prefira o padrão `127.0.0.1` e um túnel SSH:
+> `ssh -N -L 3010:127.0.0.1:3010 root@servidor`.
+
+**Webhook — a URL precisa ser alcançável de dentro do container:**
+
+| Destino | URL |
+|---|---|
+| Serviço externo (Slack, n8n) | a URL normal |
+| Outro container na mesma rede | `http://<serviço>:porta/hook` |
+| Servidor no host (Docker Desktop) | `http://host.docker.internal:PORTA/hook` |
+| Servidor no host (Linux) | idem + `--add-host=host.docker.internal:host-gateway` |
+| Com `--network host` | `http://localhost:PORTA/hook` |
+
+Em container, o mais prático é `PIPELINE_WEBHOOK_URL` no `--env-file`.
 
 ## Execução em Servidores Remotos
 
@@ -304,6 +357,7 @@ docker run --rm \
   -e POSTGRES_DBNAME=dados_cnpj \
   -v ./data/downloads:/app/data/downloads \
   -v ./data/logs:/app/data/logs \
+  -v ./data/state:/app/data/state \
   -v ./data/locations:/app/data/locations:ro \
   ghcr.io/brasildatahub/cnpj-pipeline:latest \
   complete --month 07/2026 --parallel
@@ -361,6 +415,7 @@ docker run --rm \
   -e POSTGRES_DBNAME=dados_cnpj \
   -v ./data/downloads:/app/data/downloads \
   -v ./data/logs:/app/data/logs \
+  -v ./data/state:/app/data/state \
   ghcr.io/brasildatahub/cnpj-pipeline:latest \
   complete --month 07/2026 --parallel
 
@@ -368,6 +423,7 @@ docker run --rm \
 docker run --rm \
   -v ./data/downloads:/app/data/downloads \
   -v ./data/logs:/app/data/logs \
+  -v ./data/state:/app/data/state \
   ghcr.io/brasildatahub/cnpj-pipeline:latest \
   download --month 07/2026 --workers 10
 
@@ -380,6 +436,7 @@ docker run --rm \
   -e POSTGRES_DBNAME=dados_cnpj \
   -v ./data/downloads:/app/data/downloads \
   -v ./data/logs:/app/data/logs \
+  -v ./data/state:/app/data/state \
   ghcr.io/brasildatahub/cnpj-pipeline:latest \
   db load --month 07/2026 --parallel
 

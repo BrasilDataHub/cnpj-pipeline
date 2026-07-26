@@ -34,7 +34,8 @@ def get_connection(config: dict) -> Generator[psycopg2.extensions.connection, No
 
 
 def consume_batches(insertion_queue, postgres_config: dict, thread_id: int,
-                    progress_lock, shared_progress, low_memory: bool, total_records: int):
+                    progress_lock, shared_progress, low_memory: bool, total_records: int,
+                    on_progress=None):
     """
     Função para consumir lotes de dados da fila de inserção e inserir no banco de dados PostgreSQL.
     Utiliza context manager para garantir fechamento da conexão mesmo em caso de erro.
@@ -94,6 +95,15 @@ def consume_batches(insertion_queue, postgres_config: dict, thread_id: int,
                         debug=DEBUG_LOG
                     )
 
+                # Depois do update_progress: é ele quem acumula inserted_total,
+                # então chamar antes publicaria sempre o total do lote anterior.
+                if on_progress is not None:
+                    try:
+                        on_progress(table, item["filename"],
+                                    shared_progress.get("inserted_total", 0), total_records)
+                    except Exception:
+                        pass   # instrumentação nunca interrompe a carga
+
                 insertion_queue.task_done()
                 if low_memory:
                     gc.collect()
@@ -105,9 +115,13 @@ def consume_batches(insertion_queue, postgres_config: dict, thread_id: int,
 
 
 def run_postgres_loader(files_dir: str, postgres_config: dict, total_records: int, parallel: Optional[bool] = True,
-                        low_memory: Optional[bool] = False):
+                        low_memory: Optional[bool] = False, on_progress=None) -> int:
     """
     Função para realizar a carga de dados no banco de dados PostgreSQL.
+
+    :return: total de registros efetivamente inseridos (contagem acumulada
+             pelos workers). Usado pelas estatísticas de execução; chamadores
+             que ignoram o retorno seguem funcionando como antes.
     """
     print_log("REALIZANDO CARGA NO BANCO DE DADOS POSTGRES...", level="task")
     insertion_queue = Queue(maxsize=QUEUE_SIZE)
@@ -128,7 +142,8 @@ def run_postgres_loader(files_dir: str, postgres_config: dict, total_records: in
     for i in range(num_threads):
         t = Thread(
             target=consume_batches,
-            args=(insertion_queue, postgres_config, i + 1, progress_lock, shared_progress, low_memory, total_records)
+            args=(insertion_queue, postgres_config, i + 1, progress_lock, shared_progress,
+                  low_memory, total_records, on_progress)
         )
         t.start()
         workers.append(t)
@@ -152,3 +167,5 @@ def run_postgres_loader(files_dir: str, postgres_config: dict, total_records: in
             shared_progress["bar"].close()
 
         print_log("CARGA DE DADOS CONCLUÍDA", level="success")
+
+    return int(shared_progress.get("inserted_total", 0))
