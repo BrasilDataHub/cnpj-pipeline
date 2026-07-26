@@ -321,11 +321,15 @@ As MVs pré-computam estatísticas agregadas que reduzem consultas de minutos pa
 | Flag | Tipo | Padrão | Descrição |
 |------|------|--------|-----------|
 | `--db-name` | `string` | `dados_cnpj` | Nome do banco |
+| `--only` | `string` | - | Recria só os SQLs cujo nome contenha um dos trechos (apenas para `create`) |
 | `--concurrent` | flag | - | Usa `REFRESH CONCURRENTLY` (apenas para `refresh`) |
 
 ```bash
 # Criar/recriar todas as Materialized Views
 python etl.py db views create
+
+# Recriar apenas algumas (base já carregada, sem recarregar nada)
+python etl.py db views create --only 00,05,14
 
 # Atualizar dados das MVs (após nova carga)
 python etl.py db views refresh
@@ -334,12 +338,51 @@ python etl.py db views refresh
 python etl.py db views refresh --concurrent
 ```
 
+#### `--only`: recriação seletiva
+
+O valor é uma lista separada por vírgula de **trechos do nome do arquivo**
+(`00,05,14` casa `00_helpers.sql`, `05_mv_abertura_periodo.sql` e
+`14_mv_movimentacao_mensal_cnae.sql`). Um trecho que não casa com nenhum
+arquivo interrompe o comando antes de tocar no banco, em vez de recriar menos
+MVs do que o pedido.
+
+**A seleção é expandida automaticamente com as MVs dependentes.** As MVs de
+comparativo leem as séries mensais, então o `DROP MATERIALIZED VIEW ... CASCADE`
+do topo do arquivo da série derruba junto a MV de comparativo. Sem a expansão,
+um `--only 05` deixaria o banco **sem** `mv_comparativo_territorio` e reportaria
+sucesso. As dependências são registradas em `MV_FILE_DEPENDENTS`
+(`db/postgres_builder.py`):
+
+| Selecionando | Entra junto |
+|--------------|-------------|
+| `05_mv_abertura_periodo` | `17_mv_comparativo_territorio` |
+| `14_mv_movimentacao_mensal_cnae` | `18_mv_comparativo_cnae` |
+| `15_mv_movimentacao_mensal_natureza` | `19_mv_comparativo_natureza` |
+
+A expansão aparece no log como aviso, com o motivo.
+
+Cada arquivo derruba e recria a sua MV, então **a indisponibilidade é por MV**,
+não do banco inteiro: durante a recriação de `mv_abertura_periodo` (~15 min) as
+demais MVs continuam respondendo.
+
+#### Ordem do `refresh`
+
+O `refresh` descobre as MVs existentes no catálogo e as ordena por
+**dependência** (`pg_depend`/`pg_rewrite`), não por nome. Alfabeticamente
+`mv_comparativo_*` vem antes de `mv_movimentacao_*`, mas lê dessa MV — a ordem
+alfabética publicaria um comparativo montado sobre a série do mês anterior.
+Se a consulta de dependências falhar, o comando cai para a ordem alfabética e
+avisa no log: uma ordem ruim ainda atualiza tudo.
+
 Sobre o registro em `pipeline_stats`:
-- `db views create` participa do estado e pode fechar a execução do período
-  como `completed` quando for a última etapa obrigatória pendente;
-- `db views refresh` não abre estado nem cria linha própria, mas **carimba
-  `views_refreshed_at`** na execução mais recente do período — é o sinal que
-  consumidores (ex.: o site) usam para saber que as MVs mudaram;
+- `db views create` (sem `--only`) participa do estado e pode fechar a execução
+  do período como `completed` quando for a última etapa obrigatória pendente;
+- `db views create --only` e `db views refresh` são **manutenção**: não abrem
+  estado nem criam linha própria, mas **carimbam `views_refreshed_at`** na
+  execução mais recente do período — é o sinal que consumidores (ex.: o site)
+  usam para saber que as MVs mudaram. Abrir estado num `--only` deixaria uma
+  execução pela metade no dashboard e faria uma retomada posterior acreditar
+  que a etapa de views já tinha rodado inteira naquele mês;
 - subcomandos isolados que terminam sem completar todas as etapas obrigatórias
   gravam `status = 'partial'`, nunca `completed` (ver
   [Observabilidade](observabilidade.md)).
@@ -352,7 +395,7 @@ Sobre o registro em `pipeline_stats`:
 | `mv_stats_municipio` | Estatísticas agregadas por município | ~5 min |
 | `mv_stats_cnae` | Estatísticas agregadas por CNAE | ~3 min |
 | `mv_stats_cnae_estado` | Estatísticas detalhadas CNAE x Estado | ~10 min |
-| `mv_abertura_periodo` | Aberturas por mês/cidade (desde 2000) | ~10 min |
+| `mv_abertura_periodo` | Movimentação mensal por município (desde 2000) | ~15 min |
 | `mv_top_cnaes_cidade` | Top 20 CNAEs por cidade | ~15 min |
 | `mv_stats_cidade_situacao` | Estatísticas por cidade x situação cadastral | ~8 min |
 | `mv_regime_tributario_cidade` | Regime tributário (Simples/MEI) por cidade | ~8 min |
@@ -361,14 +404,26 @@ Sobre o registro em `pipeline_stats`:
 | `mv_stats_natureza_juridica_municipio` | Estatísticas por natureza jurídica x município | ~10 min |
 | `mv_stats_natureza_juridica` | Estatísticas agregadas por natureza jurídica | ~3 min |
 | `mv_stats_natureza_juridica_cnae` | Estatísticas por natureza jurídica x CNAE | ~8 min |
+| `mv_movimentacao_mensal_cnae` | Série mensal por CNAE x UF | ~15 min |
+| `mv_movimentacao_mensal_natureza` | Série mensal por natureza jurídica x UF | ~20 min |
+| `mv_movimentacao_mensal_porte` | Série mensal por porte x UF | ~20 min |
+| `mv_comparativo_territorio` | Comparativo entre períodos por território | ~10 s |
+| `mv_comparativo_cnae` | Comparativo entre períodos por CNAE | ~1 min |
+| `mv_comparativo_natureza` | Comparativo entre períodos por natureza jurídica | ~10 s |
 
-**Arquivos SQL:** Os scripts estão em `sql/materialized_views/` e são executados na ordem alfabética.
+As três MVs de comparativo são montadas a partir das séries mensais (não da
+tabela `estabelecimento`), por isso o tempo de build é desprezível.
+
+**Arquivos SQL:** Os scripts estão em `sql/materialized_views/` e são executados
+na ordem alfabética. O `00_helpers.sql` roda antes de tudo e define
+`fn_mes_ancora()`, a âncora temporal de todas as janelas — ver
+[Âncora temporal e semântica de períodos](database.md#âncora-temporal-e-semântica-de-períodos).
 
 **Periodicidade de refresh recomendada:**
 - `mv_stats_estado`, `mv_stats_cnae`: Diário
 - Demais MVs: Semanal ou quinzenal
 
-**Espaço estimado:** ~2 GB
+**Espaço estimado:** ~5 GB
 
 ---
 

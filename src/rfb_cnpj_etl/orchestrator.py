@@ -42,6 +42,7 @@ def run_orchestrator(
         low_memory: bool = DEFAULT_LOW_MEMORY,
         only_data: bool = False,
         concurrent: bool = False,
+        views_only: Optional[list] = None,
         state=None
 ):
     """
@@ -70,6 +71,8 @@ def run_orchestrator(
         low_memory: use constrained-memory mode.
         only_data: when True, loads data only, without patch/pk/index/fk.
         concurrent: when True, uses REFRESH CONCURRENTLY for views (requires unique index).
+        views_only: for views-create, list of file-name substrings to rebuild
+                    (e.g. ["05", "14"]); None rebuilds every MV.
         state: optional RunState for checkpoint/resume. When None (default),
                steps run exactly as before, without tracking.
 
@@ -244,7 +247,8 @@ def run_orchestrator(
     # STEP 7: Materialized Views (optional commands)
     # =========================================================================
     if command == "views-create":
-        run_step(state, STEP_VIEWS, builder.create_materialized_views)
+        run_step(state, STEP_VIEWS,
+                 lambda: builder.create_materialized_views(only=views_only))
 
     if command == "views-refresh":
         # Refresh is not a build step: it does not enter the state, because

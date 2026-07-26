@@ -331,6 +331,14 @@ def _record_views_refresh(db_name: str) -> None:
         conn.close()
 
 
+def _parse_views_only(raw: Optional[str]) -> Optional[list]:
+    """Turns `--only 00,05,14` into ["00", "05", "14"]. None when not given."""
+    if not raw:
+        return None
+    parts = [item.strip() for item in raw.split(",") if item.strip()]
+    return parts or None
+
+
 def _stats_connection(db_name: str):
     """Dedicated statistics connection. Returns None when the database is down."""
     import psycopg2
@@ -454,6 +462,10 @@ def main() -> None:
     p_views_create = views_sub.add_parser("create", parents=[obs], help="Cria/recria as Materialized Views")
     p_views_create.add_argument("--db-name", type=str, default=POSTGRES["database"],
                                 help="Nome do banco Postgres")
+    p_views_create.add_argument("--only", type=str,
+                                help="Recria apenas os arquivos SQL cujo nome contenha "
+                                     "um destes trechos, separados por vírgula (ex.: 00,05,14). "
+                                     "As MVs dependentes entram automaticamente")
 
     # db views refresh
     p_views_refresh = views_sub.add_parser("refresh", help="Atualiza as Materialized Views")
@@ -540,11 +552,20 @@ def main() -> None:
             # `views refresh` is recurring maintenance, not a build step: it
             # opens no state and records no run — re-running it is always
             # valid and there is nothing to resume.
-            is_refresh = (args.db_command == "views"
-                          and getattr(args, "views_command", None) == "refresh")
-            month = None if is_refresh else _resolve_month(args)
+            #
+            # `views create --only` is the same kind of work: it rebuilds a few
+            # MVs on a database that is already loaded. Opening a run state
+            # there would leave a half-filled run in the dashboard and, worse,
+            # would let a later `complete` resume believe the views step was
+            # already done for that month.
+            is_views = args.db_command == "views"
+            views_only = _parse_views_only(getattr(args, "only", None))
+            is_maintenance = is_views and (
+                getattr(args, "views_command", None) == "refresh" or bool(views_only)
+            )
+            month = None if is_maintenance else _resolve_month(args)
             db_name = args.db_name
-            state, server = (None, None) if is_refresh else _init_observability(args, month, db_name)
+            state, server = (None, None) if is_maintenance else _init_observability(args, month, db_name)
             _record_stats_start(state, db_name)
             records = None
             try:
@@ -554,6 +575,7 @@ def main() -> None:
                         command=f"views-{args.views_command}",
                         db_name=db_name,
                         concurrent=getattr(args, "concurrent", False),
+                        views_only=views_only,
                         state=state if args.views_command == "create" else None,
                     )
                 else:
@@ -576,7 +598,9 @@ def main() -> None:
                 _record_stats_finish(state, db_name, "failed", records=records, error=str(exc))
                 raise
             else:
-                if is_refresh:
+                if is_maintenance:
+                    # No run row was opened, but the site still needs to know
+                    # the MVs changed: the timestamp lands on the latest run.
                     _record_views_refresh(db_name)
                 final_status = state.pipeline_finished() if state else "completed"
                 _record_stats_finish(state, db_name, final_status, records=records)

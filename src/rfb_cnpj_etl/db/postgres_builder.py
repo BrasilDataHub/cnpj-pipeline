@@ -24,6 +24,17 @@ from ..config import PIPELINE_STATS_TABLE, INDEX_MAX_WORKERS, INDEX_MAINTENANCE_
 # history and are independent from the RFB data.
 PRESERVED_TABLES = {PIPELINE_STATS_TABLE}
 
+# Which MV files must be rebuilt together, keyed by file-name prefix.
+# The comparison MVs read the monthly series, so `DROP MATERIALIZED VIEW ...
+# CASCADE` on a series silently takes its comparison MV with it: a
+# `--only 05_` would leave the database WITHOUT mv_comparativo_territorio and
+# report success. Selecting a series therefore always drags its dependents in.
+MV_FILE_DEPENDENTS = {
+    "05_": ["17_"],   # mv_abertura_periodo             -> mv_comparativo_territorio
+    "14_": ["18_"],   # mv_movimentacao_mensal_cnae     -> mv_comparativo_cnae
+    "15_": ["19_"],   # mv_movimentacao_mensal_natureza -> mv_comparativo_natureza
+}
+
 
 class PostgresBuilder:
     """
@@ -556,14 +567,44 @@ class PostgresBuilder:
         base_dir = Path(__file__).resolve().parents[3]
         return base_dir / "sql" / "materialized_views"
 
-    def create_materialized_views(self) -> None:
+    @staticmethod
+    def _expand_mv_selection(selection: list) -> list:
+        """Adds to `selection` the prefixes that depend on what was selected.
+
+        Runs to a fixed point so a chain (A -> B -> C) is fully covered even
+        though today's map is only one level deep.
+        """
+        expanded = list(dict.fromkeys(selection))
+        added = True
+        while added:
+            added = False
+            for source, dependents in MV_FILE_DEPENDENTS.items():
+                if not any(source in item or item in source for item in expanded):
+                    continue
+                for dependent in dependents:
+                    if dependent not in expanded:
+                        expanded.append(dependent)
+                        added = True
+                        print_log(
+                            f"DEPENDÊNCIA: '{dependent}' INCLUÍDO PORQUE '{source}' "
+                            f"FOI SELECIONADO (DROP CASCADE O DERRUBARIA)",
+                            level="warning",
+                        )
+        return expanded
+
+    def create_materialized_views(self, only: list = None) -> None:
         """
         Creates all Materialized Views from the SQL files.
 
         The SQL files are read from sql/materialized_views/ and executed
         sequentially in alphabetical order (numbering in the file name).
 
-        Can be run via: python etl.py db views create
+        Args:
+            only: when given, only files whose name contains one of these
+                  substrings are executed (e.g. ["05", "14"]). The selection is
+                  expanded with the dependent files (see MV_FILE_DEPENDENTS).
+
+        Can be run via: python etl.py db views create [--only 05,14]
         """
         try:
             print_log("CRIANDO MATERIALIZED VIEWS...", level="task")
@@ -574,6 +615,22 @@ class PostgresBuilder:
 
             # List .sql files ordered by name.
             sql_files = sorted(sql_dir.glob("*.sql"))
+
+            if only:
+                patterns = self._expand_mv_selection(only)
+                selected = [f for f in sql_files
+                            if any(p in f.name for p in patterns)]
+                unmatched = [p for p in patterns
+                             if not any(p in f.name for f in sql_files)]
+                if unmatched:
+                    raise ValueError(
+                        "NENHUM ARQUIVO SQL CORRESPONDE A: " + ", ".join(unmatched)
+                    )
+                sql_files = selected
+                print_log(
+                    "SELEÇÃO: " + ", ".join(f.name for f in sql_files),
+                    level="docs",
+                )
 
             if not sql_files:
                 print_log("NENHUM ARQUIVO SQL ENCONTRADO", level="warning")
@@ -605,7 +662,10 @@ class PostgresBuilder:
                     print_log(f"[{i:0{width}}/{total}] ERRO EM {file_name}: {e}", level="error")
                     raise
 
-            print_log("TODAS AS MATERIALIZED VIEWS FORAM CRIADAS", level="success")
+            if only:
+                print_log(f"{total} MATERIALIZED VIEW(S) SELECIONADA(S) FORAM CRIADAS", level="success")
+            else:
+                print_log("TODAS AS MATERIALIZED VIEWS FORAM CRIADAS", level="success")
 
         except Exception as e:
             print_log(f"ERRO AO CRIAR MATERIALIZED VIEWS: {e}", level="error")
@@ -614,6 +674,72 @@ class PostgresBuilder:
             if self.conn:
                 self.conn.close()
                 self.conn = None
+
+    @staticmethod
+    def _mv_refresh_order(cur) -> list:
+        """Returns the MV names in dependency order (dependencies first).
+
+        Alphabetical order is wrong here: `mv_comparativo_*` sorts BEFORE
+        `mv_movimentacao_*` but reads from it, so an alphabetical refresh would
+        publish a comparison built on the previous month's series. The real
+        graph lives in the catalog — pg_rewrite holds the MV's query and
+        pg_depend the relations that query touches.
+
+        Falls back to alphabetical order on any failure (including a dependency
+        cycle, which cannot happen with MVs but would otherwise hang the loop):
+        a suboptimal order still refreshes everything.
+        """
+        cur.execute("""
+            SELECT matviewname
+            FROM pg_matviews
+            WHERE schemaname = 'public'
+              AND matviewname LIKE 'mv_%'
+            ORDER BY matviewname;
+        """)
+        alphabetical = [row[0] for row in cur.fetchall()]
+
+        try:
+            cur.execute("""
+                SELECT DISTINCT dependente.relname, referenciada.relname
+                FROM pg_depend d
+                JOIN pg_rewrite r ON r.oid = d.objid
+                JOIN pg_class dependente ON dependente.oid = r.ev_class
+                JOIN pg_class referenciada ON referenciada.oid = d.refobjid
+                JOIN pg_namespace n ON n.oid = dependente.relnamespace
+                WHERE d.classid = 'pg_rewrite'::regclass
+                  AND d.refclassid = 'pg_class'::regclass
+                  AND dependente.relkind = 'm'
+                  AND referenciada.relkind = 'm'
+                  AND dependente.oid <> referenciada.oid
+                  AND n.nspname = 'public';
+            """)
+            known = set(alphabetical)
+            # requires[mv] = MVs that must be refreshed before it.
+            requires = {name: set() for name in alphabetical}
+            for dependent, source in cur.fetchall():
+                if dependent in known and source in known:
+                    requires[dependent].add(source)
+
+            ordered = []
+            pending = list(alphabetical)
+            while pending:
+                ready = [name for name in pending
+                         if not (requires[name] - set(ordered))]
+                if not ready:
+                    raise RuntimeError("ciclo de dependências entre MVs")
+                ordered.extend(ready)
+                pending = [name for name in pending if name not in ready]
+
+            if ordered != alphabetical:
+                print_log("ORDEM DE REFRESH AJUSTADA POR DEPENDÊNCIA ENTRE MVs", level="docs")
+            return ordered
+
+        except Exception as e:
+            print_log(
+                f"ORDENAÇÃO TOPOLÓGICA INDISPONÍVEL ({e}); USANDO ORDEM ALFABÉTICA",
+                level="warning",
+            )
+            return alphabetical
 
     def refresh_materialized_views(self, concurrent: bool = True) -> None:
         """
@@ -635,16 +761,8 @@ class PostgresBuilder:
             self.conn.autocommit = True
             cur = self.conn.cursor()
 
-            # Existing MVs whose name starts with mv_.
-            cur.execute("""
-                SELECT matviewname
-                FROM pg_matviews
-                WHERE schemaname = 'public'
-                  AND matviewname LIKE 'mv_%'
-                ORDER BY matviewname;
-            """)
-
-            mv_names = [row[0] for row in cur.fetchall()]
+            # Existing MVs whose name starts with mv_, dependencies first.
+            mv_names = self._mv_refresh_order(cur)
 
             if not mv_names:
                 print_log("NENHUMA MATERIALIZED VIEW ENCONTRADA", level="warning")
