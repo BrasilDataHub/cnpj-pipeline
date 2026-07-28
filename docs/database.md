@@ -144,12 +144,58 @@ cada carga mensal por build-and-swap (`*_new` + `RENAME` em transação única).
     de DDD do website sempre casou contra ambos os telefones
   - `bairro_norm` TEXT — `unaccent(upper(estabelecimento.bairro))`
 - **Índices:**
-  - `idx_busca_razao_social_trgm` GIN (`razao_social_norm` gin_trgm_ops)
+  - `idx_busca_razao_social_trgm` GIN (`razao_social_norm` gin_trgm_ops) —
+    busca por substring, `LIKE '%TERMO%'`
   - `idx_busca_nome_fantasia_trgm` GIN (`nome_fantasia_norm` gin_trgm_ops)
+  - `idx_busca_razao_social_prefix` (`razao_social_norm` text_pattern_ops) —
+    busca por prefixo, `LIKE 'TERMO%'`
+  - `idx_busca_nome_fantasia_prefix` (`nome_fantasia_norm` text_pattern_ops)
   - `idx_busca_cidade_situacao_cnpj` (`cod_cidade_ibge`, `cod_situacao_cadastral`, `cnpj_completo`)
   - `idx_busca_cnae_estado_situacao` (`cod_cnae_principal`, `cod_estado_ibge`, `cod_situacao_cadastral`)
+  - `idx_busca_cidade_cnae_ativos` (`cod_cidade_ibge`, `cod_cnae_principal`, `cnpj_completo`)
+    `WHERE cod_situacao_cadastral = '02'` — parcial, para o hub
+    `/municipio/{cidade}/cnae/{cnae}` do website
 - **Sem FKs** (por design: a troca atômica por RENAME não pode depender de
   constraints cruzadas; a consistência vem da recriação conjunta na carga).
+
+##### Prefixo e substring são índices diferentes
+
+O GIN trigram e o btree `text_pattern_ops` cobrem a mesma coluna e não são
+redundantes: o trigram casa em **qualquer posição**, então um prefixo curto
+puxa toda linha que contenha o termo. Medido na carga 2026-07, com
+`statement_timeout` de 10 s no website:
+
+| consulta | plano | tempo |
+|---|---|---|
+| `count(*) WHERE razao_social_norm ILIKE 'MA%'` | GIN: 11.467.078 candidatos, 9.915.193 descartados no recheck | **14.038 ms** |
+| idem + situação + `ORDER BY` + `LIMIT 20` | mesmo GIN | **14.005 ms** |
+| `count(*) WHERE nome_fantasia_norm ILIKE 'MA%'` | mesmo GIN | **9.718 ms** |
+
+São as quatro issues de `statement_timeout` do Sentry em `/api/v1/search`.
+
+Dois detalhes decidem se o índice de prefixo funciona:
+
+1. **`text_pattern_ops` é obrigatório.** A collation do banco é `en_US.utf8`;
+   um btree comum não serve `LIKE` fora da collation `C`.
+2. **O website precisa emitir `LIKE`, não `ILIKE`.** Nenhuma classe de
+   operador btree serve casamento insensível a caixa. Como a coluna já é
+   `unaccent(upper(...))` e o termo de busca recebe a mesma transliteração,
+   a troca é semanticamente neutra. Sem ela os dois índices de prefixo são
+   criados e nunca escolhidos.
+
+##### Aplicar os índices sem esperar a próxima carga
+
+`db search` reconstrói a tabela inteira e já cria todos os índices, mas leva
+horas. Para aplicar só os índices numa carga vigente:
+
+```bash
+psql -h <host> -U <user> -d dados_cnpj -f sql/busca_estabelecimento_indexes.sql
+```
+
+O script usa `CREATE INDEX CONCURRENTLY IF NOT EXISTS` (não bloqueia leitura
+nem escrita) e confere ao final se algum índice ficou inválido. **Não** rode
+com `psql -1` nem dentro de `BEGIN/COMMIT`: `CONCURRENTLY` não roda em
+transação.
 
 ### Tabelas de Domínio (Lookup)
 

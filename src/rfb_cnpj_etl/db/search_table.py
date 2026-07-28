@@ -53,8 +53,25 @@ _SELECT_SOURCE = """
 """
 
 # Final indexes of the search table (names WITHOUT the build suffix).
-# GIN trigram on the normalized name columns (substring search) and
-# composite btrees aligned with the website's anchor filters.
+# GIN trigram on the normalized name columns (substring search), btrees with
+# `text_pattern_ops` for the anchored prefix search, and composite btrees
+# aligned with the website's anchor filters.
+#
+# The two families of text index are NOT redundant — they serve opposite
+# shapes of the same column:
+#   - GIN trigram answers `LIKE '%TERM%'` (the free-text box);
+#   - the `text_pattern_ops` btree answers `LIKE 'TERM%'` (the per-field
+#     filters of the advanced search).
+# Letting the trigram answer prefixes is what produced the measured timeouts:
+# `razao_social_norm ILIKE 'MA%'` returns 11.467.078 candidates from the GIN
+# and discards 9.915.193 on recheck, taking 14,0 s against a
+# `statement_timeout` of 10 s. See docs/database.md.
+#
+# `text_pattern_ops` is required because the database collation is
+# `en_US.utf8`: a plain btree cannot serve `LIKE` outside the C collation.
+# It is also the reason the website must issue `LIKE`, not `ILIKE` — no
+# btree opclass serves a case-insensitive match. That costs nothing here:
+# both the column and the search term are already `unaccent(upper(...))`.
 SEARCH_TABLE_INDEXES = [
     {
         'name': 'idx_busca_razao_social_trgm',
@@ -65,12 +82,31 @@ SEARCH_TABLE_INDEXES = [
         'sql': 'USING GIN ("nome_fantasia_norm" gin_trgm_ops)'
     },
     {
+        'name': 'idx_busca_razao_social_prefix',
+        'sql': '("razao_social_norm" text_pattern_ops)'
+    },
+    {
+        'name': 'idx_busca_nome_fantasia_prefix',
+        'sql': '("nome_fantasia_norm" text_pattern_ops)'
+    },
+    {
         'name': 'idx_busca_cidade_situacao_cnpj',
         'sql': '("cod_cidade_ibge", "cod_situacao_cadastral", "cnpj_completo")'
     },
     {
         'name': 'idx_busca_cnae_estado_situacao',
         'sql': '("cod_cnae_principal", "cod_estado_ibge", "cod_situacao_cadastral")'
+    },
+    # Partial: the public hub `/municipio/{cidade}/cnae/{cnae}` lists only
+    # active establishments, 27.800.285 of the 72.318.968 rows. Without it the
+    # planner picks `idx_busca_cidade_situacao_cnpj` and pushes the CNAE into a
+    # Filter, discarding ~59 rows for each one kept — page 100 of the listing
+    # measured 22,8 s. `cnpj_completo` is the third column so the scan is Index
+    # Only and already ordered, with no sort.
+    {
+        'name': 'idx_busca_cidade_cnae_ativos',
+        'sql': '("cod_cidade_ibge", "cod_cnae_principal", "cnpj_completo") '
+               'WHERE "cod_situacao_cadastral" = \'02\''
     },
 ]
 
