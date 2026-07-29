@@ -5,8 +5,15 @@
 > no diretório `services/cnpj-pipeline/`, junto dos outros dois serviços Python do Base
 > Empresarial.
 >
-> **As imagens Docker não mudaram de nome** — os `docker-compose` e deploys
-> existentes continuam funcionando sem alteração.
+> **⚠️ As imagens Docker mudaram de caminho.** Elas agora são publicadas sob
+> `ghcr.io/brasildatahub/baseempresarial/`:
+>
+> | Antes (este repositório) | Agora (monorepo) |
+> |---|---|
+> | `ghcr.io/brasildatahub/cnpj-pipeline` | `ghcr.io/brasildatahub/baseempresarial/cnpj-pipeline` |
+>
+> As imagens antigas continuam publicadas **por enquanto**, e serão removidas.
+> Atualize os `docker-compose` e deploys que ainda as referenciem.
 >
 > Este repositório fica aqui **somente como registro histórico**. Abra issues e
 > PRs no monorepo.
