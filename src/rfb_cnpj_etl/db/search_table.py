@@ -17,6 +17,7 @@ read downtime for the website.
 Can be run standalone via: python etl.py db search
 """
 
+from .schema_target import qualificar
 import time
 
 import psycopg2
@@ -47,9 +48,32 @@ _SELECT_SOURCE = """
         est.cep,
         est.ddd_telefone_1,
         est.ddd_telefone_2,
-        unaccent(upper(est.bairro))         AS bairro_norm
-    FROM public.estabelecimento est
-    LEFT JOIN public.empresa emp ON emp.cnpj_basico = est.cnpj_basico
+        unaccent(upper(est.bairro))         AS bairro_norm,
+        -- row_hash: a assinatura da linha, e o que torna possivel comparar duas
+        -- geracoes em ~10 segundos.
+        --
+        -- POR QUE ELE PRECISA EXISTIR DESDE A PRIMEIRA CARGA: o gate de delta
+        -- compara o schema novo com o vigente. Se a coluna so aparecer na carga
+        -- N, a primeira comparacao possivel e entre N e N+1 — ou seja, o
+        -- primeiro incremental so aconteceria em N+2. Um mes a mais de ciclo
+        -- destrutivo por causa de uma coluna que custa 578 MB.
+        --
+        -- md5 e nao sha256: nao ha ameaca adversarial aqui, so deteccao de
+        -- MUDANCA. md5 e ~3x mais rapido e cabe em 16 bytes.
+        md5(
+            coalesce(emp.razao_social, '')            || '|' ||
+            coalesce(est.nome_fantasia, '')           || '|' ||
+            coalesce(est.cod_cnae_principal, '')      || '|' ||
+            coalesce(est.cod_situacao_cadastral, '')  || '|' ||
+            coalesce(est.cod_cidade_ibge::text, '')   || '|' ||
+            coalesce(emp.cod_porte, '')               || '|' ||
+            coalesce(emp.cod_natureza_juridica, '')   || '|' ||
+            coalesce(est.data_inicio_atividade::text, '') || '|' ||
+            coalesce(est.cep, '')                     || '|' ||
+            coalesce(est.matriz_filial, '')
+        )::uuid                             AS row_hash
+    FROM estabelecimento est
+    LEFT JOIN empresa emp ON emp.cnpj_basico = est.cnpj_basico
 """
 
 # Final indexes of the search table (names WITHOUT the build suffix).
@@ -146,11 +170,11 @@ def build_search_table(postgres_config: dict) -> None:
             raise RuntimeError("Tabelas de origem (estabelecimento/empresa) não encontradas.")
 
         # Discards leftovers from a previous interrupted build
-        cur.execute(f'DROP TABLE IF EXISTS public."{build_table}";')
+        cur.execute(f'DROP TABLE IF EXISTS {qualificar(build_table)};')
 
         # 1. CTAS without WAL: durability comes from the SET LOGGED right after
         start = time.time()
-        cur.execute(f'CREATE UNLOGGED TABLE public."{build_table}" AS {_SELECT_SOURCE};')
+        cur.execute(f'CREATE UNLOGGED TABLE {qualificar(build_table)} AS {_SELECT_SOURCE};')
         rows = cur.rowcount
         print_log(f"  -> CTAS concluído: {rows:,} linhas ({time.time() - start:.1f}s)", level="docs")
 
@@ -166,12 +190,12 @@ def build_search_table(postgres_config: dict) -> None:
 
         # 2. Durability before indexing (fewer bytes rewritten)
         start = time.time()
-        cur.execute(f'ALTER TABLE public."{build_table}" SET LOGGED;')
+        cur.execute(f'ALTER TABLE {qualificar(build_table)} SET LOGGED;')
         print_log(f"  -> SET LOGGED ({time.time() - start:.1f}s)", level="docs")
 
         # 3. PK + indexes (the *_new table takes no reads; plain CREATE INDEX)
         start = time.time()
-        cur.execute(f'ALTER TABLE public."{build_table}" ADD PRIMARY KEY ("cnpj_completo");')
+        cur.execute(f'ALTER TABLE {qualificar(build_table)} ADD PRIMARY KEY ("cnpj_completo");')
         print_log(f"  -> PK criada ({time.time() - start:.1f}s)", level="docs")
 
         total = len(SEARCH_TABLE_INDEXES)
@@ -179,25 +203,28 @@ def build_search_table(postgres_config: dict) -> None:
             build_name = f"{index['name']}{BUILD_SUFFIX}"
             start = time.time()
             cur.execute(
-                f'CREATE INDEX "{build_name}" ON public."{build_table}" {index["sql"]};'
+                f'CREATE INDEX "{build_name}" ON {qualificar(build_table)} {index["sql"]};'
             )
             print_log(
                 f"  -> [{i}/{total}] ÍNDICE CRIADO: {index['name']} ({time.time() - start:.1f}s)",
                 level="docs"
             )
 
-        cur.execute(f'ANALYZE public."{build_table}";')
+        cur.execute(f'ANALYZE {qualificar(build_table)};')
 
         # 4. Atomic swap: readers never see an intermediate state
         conn.autocommit = False
-        cur.execute(f'DROP TABLE IF EXISTS public."{SEARCH_TABLE}";')
-        cur.execute(f'ALTER TABLE public."{build_table}" RENAME TO "{SEARCH_TABLE}";')
+        cur.execute(f'DROP TABLE IF EXISTS {qualificar(SEARCH_TABLE)};')
+        cur.execute(f'ALTER TABLE {qualificar(build_table)} RENAME TO "{SEARCH_TABLE}";')
         cur.execute(
-            f'ALTER TABLE public."{SEARCH_TABLE}" RENAME CONSTRAINT '
+            f'ALTER TABLE {qualificar(SEARCH_TABLE)} RENAME CONSTRAINT '
             f'"{_pk_name(build_table)}" TO "{_pk_name(SEARCH_TABLE)}";'
         )
         for index in SEARCH_TABLE_INDEXES:
-            cur.execute(f'ALTER INDEX public."{index["name"]}{BUILD_SUFFIX}" RENAME TO "{index["name"]}";')
+            cur.execute(
+                f'ALTER INDEX {qualificar(index["name"] + BUILD_SUFFIX)} '
+                f'RENAME TO "{index["name"]}";'
+            )
         conn.commit()
         conn.autocommit = True
 

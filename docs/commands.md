@@ -268,6 +268,40 @@ descartados no início, e a troca funciona tanto na primeira execução
 
 ---
 
+## Comandos do ciclo mensal blue/green
+
+`db bootstrap`, `db cycle`, `db validate`, `db publish`, `db rollback`, `db gc`
+e `db nuke` formam o ciclo mensal introduzido pelos itens 24–26 do roadmap 20.
+Eles substituem o antigo primeiro passo do ETL — o `DROP` das tabelas — por uma
+carga em schema novo, com o schema anterior servindo o site o tempo todo.
+
+| Comando | O que faz | Publica? |
+|---------|-----------|----------|
+| `db bootstrap --load-id YYYYMM` | cria `ext`, `meta` e `dados_<load_id>`; revoga escrita no schema vigente | não |
+| `db cycle --load-id YYYYMM` | `bootstrap` + instrução do próximo passo | não |
+| `db validate --load-id YYYYMM` | portão de qualidade: contagem, MVs e gate de delta | **não** |
+| `db publish --load-id YYYYMM` | valida e troca o `search_path` (< 5 s) | sim |
+| `db rollback [--para SCHEMA]` | volta para a geração anterior (< 60 s) | sim |
+| `db gc [--apagar]` | lista o N−2 em diante; sem `--apagar` não apaga nada | não |
+| `db nuke --i-know-what-im-doing` | destrói o schema. Fora do ciclo mensal | não |
+
+```bash
+python etl.py db bootstrap --load-id 202608
+python etl.py db load      --load-id 202608     # e as demais etapas de carga
+python etl.py db validate  --load-id 202608     # reprova sem publicar
+python etl.py db publish   --load-id 202608     # < 5 s
+python etl.py db rollback                       # se preciso, < 60 s
+```
+
+Todos os verbos pegam o `flock` compartilhado em `PIPELINE_LOCK_FILE`, **exceto
+`rollback` e `gc`** — um rollback precisa acontecer justamente quando alguma
+coisa está travada.
+
+> A explicação completa (os schemas, o gate de delta, o `REVOKE`, a
+> sequência de um mês) está em **[ciclo-blue-green.md](ciclo-blue-green.md)**.
+
+---
+
 ## Comando `db dead-letter`
 
 Fecha o ciclo dos **lotes de COPY que falharam definitivamente** durante a

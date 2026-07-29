@@ -267,7 +267,11 @@ try:
         "host": p.hostname, "port": p.port, "user": p.username,
         "password": p.password, "database": p.path.lstrip("/"),
     })
-    builder.drop_tables()
+    # A afirmacao explicita e obrigatoria desde o item 25: `drop_tables()` era o
+    # PRIMEIRO passo do ETL e em 25/07/2026 consumiu 6h43 sobre um banco ja
+    # destruido. Aqui ela e legitima — o teste existe justamente para exercitar
+    # a destruicao e provar que `pipeline_stats` sobrevive a ela.
+    builder.drop_tables(i_know_what_im_doing=True)
 
     with conn.cursor() as cur:
         cur.execute("SELECT tablename FROM pg_tables WHERE schemaname='public';")
