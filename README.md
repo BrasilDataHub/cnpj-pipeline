@@ -8,6 +8,10 @@ ghcr.io/brasildatahub/cnpj-pipeline
 
 Fonte: [Dados Abertos CNPJ - Receita Federal](https://dados.gov.br/dados/conjuntos-dados/cadastro-nacional-da-pessoa-juridica---cnpj)
 
+> **Implantando do zero?** Este repositório é a etapa 5 de uma sequência que
+> atravessa quatro repositórios. A ordem está no
+> [runbook de implantação](../../docs/roadmap/20-arquitetura-de-busca-2026-07/IMPLANTACAO.md).
+
 ## Finalidade
 
 Este projeto facilita o acesso, extração e estruturação dos dados públicos do CNPJ, disponibilizados
@@ -63,6 +67,10 @@ Variáveis lidas pelo pipeline (todas opcionais; os valores abaixo são os defau
 | `PIPELINE_DEAD_LETTER_DIR` | Diretório onde lotes de COPY que falharam são preservados | `data/logs/dead_letter` |
 | `INDEX_MAX_WORKERS` | Conexões simultâneas na criação de índices | `4` |
 | `INDEX_MAINTENANCE_WORK_MEM` | `maintenance_work_mem` por conexão de criação de índice | `2GB` |
+| `MV_BUILD_WORK_MEM` | `work_mem` da sessão que constrói as MVs | `1GB` |
+| `MV_BUILD_MAINTENANCE_WORK_MEM` | `maintenance_work_mem` da mesma sessão | `2GB` |
+| `MAX_DELTA_PCT` | Teto do gate de delta do `db validate`, em % | `25` |
+| `PIPELINE_LOCK_FILE` | `flock` compartilhado com `sitemap-service` e `search-indexer-service` | `/var/lib/bdh/pipeline.lock` |
 
 Referência canônica (com detalhes e implicações de memória):
 [Configuração](docs/configuration.md).
@@ -449,12 +457,13 @@ Detalhes de schema, webhooks e dashboard:
 | [Guia do Banco de Dados](docs/database.md) | Estrutura do banco, índices, MVs e consultas |
 | [Observabilidade e retomada](docs/observabilidade.md) | Estado, `--force`, dashboard, webhooks e `pipeline_stats` |
 | [Limpeza de índices (07/2026)](docs/index_cleanup.md) | Registro datado: quais índices foram removidos e por quê |
-| [Auditoria completa (07/2026)](docs/auditoria-2026-07.md) | Registro datado: inventário, bugs corrigidos, contrato em inglês e otimizações |
-| [Investigação de erros (07/2026)](INVESTIGACAO-ERROS-2026-07.md) | Post-mortem do incidente de 25/07/2026 (`/dev/shm`, FKs, SIAFI→IBGE) |
 
-Os três últimos são **registros datados** (post-mortems/auditorias): documentam
-decisões e incidentes no momento em que ocorreram e não são atualizados
-retroativamente.
+O último é um **registro datado**: documenta decisões e incidentes no momento em
+que ocorreram e não é atualizado retroativamente.
+
+A auditoria de 07/2026 e o post-mortem do incidente de 25/07 foram removidos do
+repositório em `7cd15cc`; recupere-os com
+`git show 7cd15cc^:docs/auditoria-2026-07.md` se precisar do conteúdo.
 
 ## Estrutura do Projeto
 
