@@ -8,6 +8,7 @@ from .schema_target import qualificar
 import os
 import time
 import psycopg2
+from psycopg2 import sql
 from pathlib import Path
 from queue import Queue, Empty
 from threading import Lock, Thread
@@ -422,7 +423,15 @@ class PostgresBuilder:
         cur = conn.cursor()
         for param, value in self._index_session_config().items():
             try:
-                cur.execute(f"SET {param} = '{value}';")
+                # `param` vem de constantes do módulo, mas `value` vem de
+                # INDEX_MAINTENANCE_WORK_MEM, que é lido de os.getenv — o único
+                # ponto deste arquivo onde dado externo alcançava SQL montado
+                # por f-string. `Identifier` cuida do nome e `%s` do valor,
+                # como a sessão de build das MVs já faz mais abaixo.
+                cur.execute(
+                    sql.SQL("SET {} = %s").format(sql.Identifier(param)),
+                    (value,),
+                )
             except psycopg2.Error as e:
                 print_log(f"AVISO: não foi possível aplicar {param}={value}: {e}", level="warning")
         return conn, cur
