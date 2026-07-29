@@ -1,3 +1,16 @@
+> # ⚠️ Repositório arquivado — o desenvolvimento mudou de lugar
+>
+> Este serviço agora vive em
+> **[BrasilDataHub/baseempresarial-services](https://github.com/BrasilDataHub/baseempresarial-services)**,
+> no diretório `services/cnpj-pipeline/`, junto dos outros dois serviços Python do Base
+> Empresarial.
+>
+> **As imagens Docker não mudaram de nome** — os `docker-compose` e deploys
+> existentes continuam funcionando sem alteração.
+>
+> Este repositório fica aqui **somente como registro histórico**. Abra issues e
+> PRs no monorepo.
+
 # cnpj-pipeline
 
 ETL completo dos dados públicos de CNPJ para PostgreSQL.
