@@ -113,13 +113,39 @@ class PostgresBuilder:
             print_log(f"ERRO AO HABILITAR EXTENSÕES: {e}", level="error")
             raise
 
-    def drop_tables(self):
+    def drop_tables(self, i_know_what_im_doing: bool = False):
         """Removes previous tables, preserving the metadata ones.
 
-        `pipeline_stats` holds the run history and needs to survive a reload
-        — without this exception, the drop would sweep all of `pg_tables` and
-        erase exactly the record of what already ran.
+        SAIU DO CAMINHO NORMAL DO CICLO (item 25).
+        ==========================================
+
+        Este método é o `DROP TABLE CASCADE` com que o ETL abria. Foi assim que
+        a rodada de 25/07/2026 abortou **após 6h43 sobre um banco já
+        destruído**: não havia estado intermediário do qual voltar, porque o
+        primeiro passo tinha eliminado o anterior.
+
+        No blue/green a carga acontece num schema NOVO enquanto o anterior
+        serve, e destruir deixa de fazer parte do fluxo. O método continua
+        existindo porque há um caso legítimo — recomeçar um ambiente do zero —
+        mas ele agora exige uma afirmação explícita, exposta na CLI como
+        `db nuke --i-know-what-im-doing`.
+
+        A guarda não é burocracia: a diferença entre "o comando destrutivo é o
+        primeiro passo do fluxo" e "o comando destrutivo exige ser digitado por
+        extenso" é exatamente a diferença entre perder 6h43 e não perder.
+
+        `pipeline_stats` segue preservada: sem essa exceção, o drop varreria
+        todo o `pg_tables` e apagaria justamente o registro do que já rodou.
         """
+        if not i_know_what_im_doing:
+            raise RuntimeError(
+                "drop_tables() destrói o schema inteiro e NÃO faz mais parte do "
+                "ciclo mensal. Em 25/07/2026 ele consumiu 6h43 sobre um banco já "
+                "destruído. O caminho do ciclo é `db cycle`, que carrega num "
+                "schema novo enquanto o anterior serve. Para recomeçar um "
+                "ambiente de propósito: `db nuke --i-know-what-im-doing`."
+            )
+
         try:
             conn = self._connect()
             conn.autocommit = True
@@ -564,7 +590,9 @@ class PostgresBuilder:
             self._create_database()
             self.conn = self._connect()
             self.enable_extensions()
-            self.drop_tables()
+            # Caminho legado de recarga completa: a afirmação é explícita aqui
+            # porque quem chamou já passou por `db nuke`.
+            self.drop_tables(i_know_what_im_doing=True)
             self.create_tables()
         finally:
             if self.conn:

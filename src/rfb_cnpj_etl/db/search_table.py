@@ -48,9 +48,32 @@ _SELECT_SOURCE = """
         est.cep,
         est.ddd_telefone_1,
         est.ddd_telefone_2,
-        unaccent(upper(est.bairro))         AS bairro_norm
-    FROM public.estabelecimento est
-    LEFT JOIN public.empresa emp ON emp.cnpj_basico = est.cnpj_basico
+        unaccent(upper(est.bairro))         AS bairro_norm,
+        -- row_hash: a assinatura da linha, e o que torna possivel comparar duas
+        -- geracoes em ~10 segundos.
+        --
+        -- POR QUE ELE PRECISA EXISTIR DESDE A PRIMEIRA CARGA: o gate de delta
+        -- compara o schema novo com o vigente. Se a coluna so aparecer na carga
+        -- N, a primeira comparacao possivel e entre N e N+1 — ou seja, o
+        -- primeiro incremental so aconteceria em N+2. Um mes a mais de ciclo
+        -- destrutivo por causa de uma coluna que custa 578 MB.
+        --
+        -- md5 e nao sha256: nao ha ameaca adversarial aqui, so deteccao de
+        -- MUDANCA. md5 e ~3x mais rapido e cabe em 16 bytes.
+        md5(
+            coalesce(emp.razao_social, '')            || '|' ||
+            coalesce(est.nome_fantasia, '')           || '|' ||
+            coalesce(est.cod_cnae_principal, '')      || '|' ||
+            coalesce(est.cod_situacao_cadastral, '')  || '|' ||
+            coalesce(est.cod_cidade_ibge::text, '')   || '|' ||
+            coalesce(emp.cod_porte, '')               || '|' ||
+            coalesce(emp.cod_natureza_juridica, '')   || '|' ||
+            coalesce(est.data_inicio_atividade::text, '') || '|' ||
+            coalesce(est.cep, '')                     || '|' ||
+            coalesce(est.matriz_filial, '')
+        )::uuid                             AS row_hash
+    FROM estabelecimento est
+    LEFT JOIN empresa emp ON emp.cnpj_basico = est.cnpj_basico
 """
 
 # Final indexes of the search table (names WITHOUT the build suffix).

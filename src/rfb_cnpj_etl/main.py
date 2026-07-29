@@ -367,6 +367,99 @@ def _complete_files_dir(download_dir: Optional[str], month: Optional[str]) -> Op
     return os.path.join(download_dir, period)
 
 
+def _executar_ciclo(args) -> None:
+    """
+    Despacha os verbos do ciclo mensal blue/green.
+
+    Todos passam pelo flock compartilhado (`db/lock.py`): cnpj-pipeline,
+    sitemap-service e search-indexer disputam a MESMA NVMe e o MESMO banco, e
+    rodar dois ao mesmo tempo nao produz erro — produz uma janela de carga que
+    estoura sem que ninguem saiba por que.
+
+    `rollback` e `gc` sao a excecao: um rollback precisa acontecer JUSTAMENTE
+    quando alguma coisa esta travada, e exigir o lock ali seria travar a saida
+    de emergencia.
+    """
+    import psycopg2
+
+    from .db import cycle
+    from .db import schema_target as st
+    from .db.lock import lock_do_pipeline
+
+    conexao = psycopg2.connect(
+        host=POSTGRES["host"], port=POSTGRES["port"], dbname=args.db_name,
+        user=POSTGRES["user"], password=POSTGRES["password"],
+    )
+
+    def _rodar():
+        comando = args.db_command
+
+        if comando == "bootstrap":
+            cycle.bootstrap(conexao, args.load_id, args.db_name)
+
+        elif comando == "cycle":
+            schema = cycle.bootstrap(conexao, args.load_id, args.db_name)
+            print_log(
+                f"schema {schema} pronto. Execute as etapas de carga com o "
+                f"search_path ja apontado para ele; o schema anterior segue "
+                f"servindo o site durante todo o processo.",
+                level="success",
+            )
+
+        elif comando == "validate":
+            vigente = st.schema_vigente(conexao, args.db_name)
+            cycle.validate(conexao, st.nome_do_schema(args.load_id), vigente)
+
+        elif comando == "publish":
+            cycle.publish(conexao, args.load_id, args.db_name,
+                          pular_validacao=args.pular_validacao)
+
+        elif comando == "rollback":
+            cycle.rollback(conexao, args.db_name, para=args.para)
+
+        elif comando == "gc":
+            candidatos = cycle.schemas_para_expurgo(conexao, args.db_name)
+
+            if not candidatos:
+                print_log("nenhum schema elegivel a remocao (o N-1 nunca entra)", level="success")
+                return
+
+            for schema in candidatos:
+                if args.apagar:
+                    with conexao.cursor() as cur:
+                        cur.execute(f'DROP SCHEMA "{schema}" CASCADE;')
+                    conexao.commit()
+                    print_log(f"schema removido: {schema}", level="docs")
+                else:
+                    print_log(f"elegivel a remocao: {schema}", level="docs")
+
+            if not args.apagar:
+                print_log("nada foi apagado. Use --apagar para confirmar.", level="warning")
+
+        elif comando == "nuke":
+            if not args.confirmado:
+                print_log(
+                    "db nuke DESTROI o schema inteiro e nao faz mais parte do ciclo "
+                    "mensal. Em 25/07/2026 este caminho consumiu 6h43 sobre um banco "
+                    "ja destruido. Confirme com --i-know-what-im-doing.",
+                    level="error",
+                )
+                raise SystemExit(2)
+
+            from .db.postgres_builder import PostgresBuilder
+
+            PostgresBuilder(db_name=args.db_name).drop_tables(i_know_what_im_doing=True)
+
+    try:
+        if args.db_command in ("rollback", "gc"):
+            _rodar()
+        else:
+            with lock_do_pipeline(dono=f"cnpj-pipeline:{args.db_command}"):
+                _rodar()
+    finally:
+        conexao.close()
+
+
 def main() -> None:
     obs = _observability_parser()
     parser = argparse.ArgumentParser(
@@ -441,6 +534,73 @@ def main() -> None:
         help="Constrói/reconstrói a tabela de busca busca_estabelecimento (build-and-swap)"
     )
     p_search.add_argument("--db-name", type=str, default=POSTGRES["database"])
+
+    # ---------------------------------------------------------------------
+    # Ciclo mensal blue/green (item 25)
+    # ---------------------------------------------------------------------
+    # Os quatro verbos existem para separar o que hoje e um comando so e
+    # destrutivo desde a primeira linha. `db load` abre com DROP TABLE CASCADE;
+    # em 25/07/2026 isso consumiu 6h43 sobre um banco ja destruido.
+    p_bootstrap = db_sub.add_parser(
+        "bootstrap", parents=[obs],
+        help="Prepara o ciclo: schemas ext/meta, schema novo e o REVOKE do vigente"
+    )
+    p_bootstrap.add_argument("--db-name", type=str, default=POSTGRES["database"])
+    p_bootstrap.add_argument("--load-id", type=str, required=True,
+                             help="Identificador da carga, ex.: 202608")
+
+    p_cycle = db_sub.add_parser(
+        "cycle", parents=[obs],
+        help="Executa o ciclo completo num schema NOVO (o anterior segue servindo)"
+    )
+    p_cycle.add_argument("--db-name", type=str, default=POSTGRES["database"])
+    p_cycle.add_argument("--load-id", type=str, required=True)
+    p_cycle.add_argument("--month", type=str)
+    p_cycle.add_argument("--download-dir", type=str)
+    p_cycle.add_argument("--sem-lock", action="store_true",
+                         help="Nao adquire o flock compartilhado (para testes)")
+
+    p_validate = db_sub.add_parser(
+        "validate", parents=[obs],
+        help="Portao de qualidade: contagem, MVs e gate de delta. Nao publica nada"
+    )
+    p_validate.add_argument("--db-name", type=str, default=POSTGRES["database"])
+    p_validate.add_argument("--load-id", type=str, required=True)
+
+    p_publish = db_sub.add_parser(
+        "publish", parents=[obs],
+        help="Publica o schema novo (troca de search_path, < 5 s)"
+    )
+    p_publish.add_argument("--db-name", type=str, default=POSTGRES["database"])
+    p_publish.add_argument("--load-id", type=str, required=True)
+    p_publish.add_argument("--pular-validacao", action="store_true",
+                           help="NAO use em producao: o portao de qualidade e o que impede "
+                                "publicar uma carga truncada")
+
+    p_rollback = db_sub.add_parser(
+        "rollback", parents=[obs],
+        help="Volta o search_path para a geracao anterior (segundos)"
+    )
+    p_rollback.add_argument("--db-name", type=str, default=POSTGRES["database"])
+    p_rollback.add_argument("--para", type=str, help="Schema de destino (default: o N-1)")
+
+    p_gc = db_sub.add_parser(
+        "gc", parents=[obs],
+        help="LISTA os schemas elegiveis a remocao (N-2 em diante). Nao apaga"
+    )
+    p_gc.add_argument("--db-name", type=str, default=POSTGRES["database"])
+    p_gc.add_argument("--apagar", action="store_true",
+                      help="Apaga de fato. O N-1 NUNCA entra na lista")
+
+    # db-nuke — o antigo primeiro passo do ETL, agora fora do caminho normal
+    p_nuke = db_sub.add_parser(
+        "nuke", parents=[obs],
+        help="DESTROI o schema inteiro. Fora do ciclo mensal desde o item 25"
+    )
+    p_nuke.add_argument("--db-name", type=str, default=POSTGRES["database"])
+    p_nuke.add_argument("--i-know-what-im-doing", dest="confirmado", action="store_true",
+                        help="Obrigatorio. Em 25/07/2026 este comando consumiu 6h43 "
+                             "sobre um banco ja destruido")
 
     # db-dead-letter
     p_dead_letter = db_sub.add_parser(
@@ -538,7 +698,11 @@ def main() -> None:
         elif args.command == "db":
             # `dead-letter` is maintenance over parked batches: no state, no
             # stats, no orchestrator — list or re-attempt the COPYs and leave.
-            if args.db_command == "dead-letter":
+            if args.db_command in ("bootstrap", "cycle", "validate", "publish",
+                                    "rollback", "gc", "nuke"):
+                _executar_ciclo(args)
+
+            elif args.db_command == "dead-letter":
                 from .db.dead_letter import retry_dead_letters, show_dead_letters
                 if args.retry:
                     result = retry_dead_letters(_db_config(args.db_name),
