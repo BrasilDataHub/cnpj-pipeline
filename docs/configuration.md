@@ -60,6 +60,31 @@ paralelo — o objetivo é o menor tempo total.
 > (com o padrão, até ~8 GB do lado do Postgres). Em hosts com 8–16 GB de RAM,
 > reduza um dos dois (ex.: `INDEX_MAINTENANCE_WORK_MEM=512MB`).
 
+### Build das Materialized Views
+
+| Variável | Descrição | Padrão |
+|----------|-----------|--------|
+| `MV_BUILD_WORK_MEM` | `work_mem` da sessão que constrói as MVs | `1GB` |
+| `MV_BUILD_MAINTENANCE_WORK_MEM` | `maintenance_work_mem` da mesma sessão | `2GB` |
+
+Os dois valem **só para a sessão de build** — o resto do banco continua com o
+que está no `postgresql.conf`.
+
+### Ciclo mensal blue/green
+
+| Variável | Descrição | Padrão |
+|----------|-----------|--------|
+| `MAX_DELTA_PCT` | Teto do gate de delta, em por cento. Acima dele o `db validate` reprova e **nada é publicado** | `25` |
+| `PIPELINE_LOCK_FILE` | `flock` advisory compartilhado com `sitemap-service` e `search-indexer-service`. Precisa ser o **mesmo caminho** nos três | `/var/lib/bdh/pipeline.lock` |
+
+O diretório do lock precisa existir e ser gravável antes da primeira execução:
+
+```bash
+sudo mkdir -p /var/lib/bdh && sudo chown <usuario-do-pipeline> /var/lib/bdh
+```
+
+Guia completo: [Ciclo mensal blue/green](ciclo-blue-green.md).
+
 ### Somente docker-compose
 
 Estas variáveis são lidas pelo `docker-compose.yaml`, nunca pelo Python:
@@ -200,6 +225,28 @@ automaticamente** pelo ETL e devem ser aplicados manualmente conforme a necessid
 | `general_improvements.sql` | Extensões PostgreSQL, funções de manutenção, validações e configurações de performance | Permissões de superusuário para algumas operações |
 | `prod_hygiene.sql` | Higiene de índices em produção (remoções documentadas em [index_cleanup](index_cleanup.md)) | Aplicar com critério, seguindo o protocolo do documento |
 | `sitemap_indexes.sql` | Índices para geração de sitemaps | **Redundante** desde que os 3 índices foram incorporados a `advanced_indexes.py`; mantido apenas para referência |
+| `roles_e_work_mem.sql` | `work_mem` e `statement_timeout` por role (item 32) | Idempotente. **Aplicar uma vez**, antes de subir `PG_WORK_MEM` no perfil da máquina |
+| `indices_sem_uso_2026-07-28.sql` | DDL versionado dos 67 índices sem uso (item 13) | Só o `CREATE INDEX` de cada um: é o que permite desfazer um drop |
+| `drop_indices_sem_uso.sql` | Remove os índices sem uso, liberando 34,8 GB de 134 GB | `DROP ... CONCURRENTLY`, portanto **fora de transação**: rode com `psql -f`, nunca colado num bloco. Exige o backup do item 0 funcionando |
+
+**`roles_e_work_mem.sql`** é o par indivisível de `PG_WORK_MEM=96MB` no perfil
+`compartilhada-14gb`. O valor alto existe porque o ETL e o build das 19 MVs
+derramam em disco (9.545 derrames medidos, ~706 GB de IO evitável), mas o mesmo
+96 MB numa consulta do site é `work_mem` **por operação de sort/hash** — com
+paralelismo, quase 1 GB numa requisição anônima. O script dá a cada role o valor
+que faz sentido para ela:
+
+| Role | `work_mem` | `statement_timeout` | Superfície |
+|------|-----------|---------------------|------------|
+| `dados_read` | 32 MB | 5 s (+ `idle_in_transaction` 60 s) | o site |
+| `dados_export` | 64 MB | 30 min (+ paralelismo limitado a 1) | exportações e sitemap |
+| a role da carga | herda `PG_WORK_MEM` (96 MB) | sem teto | o pipeline |
+
+O paralelismo do `dados_export` é limitado a 1 de propósito: a exportação pode
+esperar, o visitante não.
+
+Subir `PG_WORK_MEM` **sem** aplicar este script é o caminho para o site alocar
+memória de ETL numa página pública.
 
 ### Como Executar
 

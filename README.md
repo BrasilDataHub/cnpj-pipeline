@@ -444,6 +444,7 @@ Detalhes de schema, webhooks e dashboard:
 |-----------|-----------|
 | [Guia Docker](docs/docker.md) | Volumes, permissões, execução remota |
 | [Referência de Comandos](docs/commands.md) | Todos os comandos, flags e execução por etapas |
+| [Ciclo mensal blue/green](docs/ciclo-blue-green.md) | Carga em schema novo, portão de qualidade, publish e rollback |
 | [Configuração](docs/configuration.md) | Referência canônica de variáveis de ambiente e constantes |
 | [Guia do Banco de Dados](docs/database.md) | Estrutura do banco, índices, MVs e consultas |
 | [Observabilidade e retomada](docs/observabilidade.md) | Estado, `--force`, dashboard, webhooks e `pipeline_stats` |
