@@ -15,6 +15,8 @@ Estimated space: ~20 GB (in addition to the ETL indexes)
 Estimated creation time: 30-45 minutes (with parallelism)
 """
 
+from .schema_target import qualificar
+
 # Extensions required by the advanced indexes and by the database operation:
 # - pg_trgm: text search with ILIKE '%term%' (GIN trigram indexes)
 # - unaccent: accent normalization on the data (lean search table, AG13)
@@ -451,9 +453,9 @@ def build_create_index_sql(index_def: dict, concurrent: bool = True) -> str:
     concurrent_str = 'CONCURRENTLY ' if concurrent else ''
 
     if index_type.upper() == 'BTREE':
-        sql = f'CREATE INDEX {concurrent_str}IF NOT EXISTS "{name}" ON public."{table}" ({cols_str})'
+        sql = f'CREATE INDEX {concurrent_str}IF NOT EXISTS "{name}" ON {qualificar(table)} ({cols_str})'
     else:
-        sql = f'CREATE INDEX {concurrent_str}IF NOT EXISTS "{name}" ON public."{table}" USING {index_type} ({cols_str})'
+        sql = f'CREATE INDEX {concurrent_str}IF NOT EXISTS "{name}" ON {qualificar(table)} USING {index_type} ({cols_str})'
 
     # Add INCLUDE (covering index)
     if include:

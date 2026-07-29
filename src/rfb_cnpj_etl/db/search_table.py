@@ -17,6 +17,7 @@ read downtime for the website.
 Can be run standalone via: python etl.py db search
 """
 
+from .schema_target import qualificar
 import time
 
 import psycopg2
@@ -146,11 +147,11 @@ def build_search_table(postgres_config: dict) -> None:
             raise RuntimeError("Tabelas de origem (estabelecimento/empresa) não encontradas.")
 
         # Discards leftovers from a previous interrupted build
-        cur.execute(f'DROP TABLE IF EXISTS public."{build_table}";')
+        cur.execute(f'DROP TABLE IF EXISTS {qualificar(build_table)};')
 
         # 1. CTAS without WAL: durability comes from the SET LOGGED right after
         start = time.time()
-        cur.execute(f'CREATE UNLOGGED TABLE public."{build_table}" AS {_SELECT_SOURCE};')
+        cur.execute(f'CREATE UNLOGGED TABLE {qualificar(build_table)} AS {_SELECT_SOURCE};')
         rows = cur.rowcount
         print_log(f"  -> CTAS concluído: {rows:,} linhas ({time.time() - start:.1f}s)", level="docs")
 
@@ -166,12 +167,12 @@ def build_search_table(postgres_config: dict) -> None:
 
         # 2. Durability before indexing (fewer bytes rewritten)
         start = time.time()
-        cur.execute(f'ALTER TABLE public."{build_table}" SET LOGGED;')
+        cur.execute(f'ALTER TABLE {qualificar(build_table)} SET LOGGED;')
         print_log(f"  -> SET LOGGED ({time.time() - start:.1f}s)", level="docs")
 
         # 3. PK + indexes (the *_new table takes no reads; plain CREATE INDEX)
         start = time.time()
-        cur.execute(f'ALTER TABLE public."{build_table}" ADD PRIMARY KEY ("cnpj_completo");')
+        cur.execute(f'ALTER TABLE {qualificar(build_table)} ADD PRIMARY KEY ("cnpj_completo");')
         print_log(f"  -> PK criada ({time.time() - start:.1f}s)", level="docs")
 
         total = len(SEARCH_TABLE_INDEXES)
@@ -179,25 +180,28 @@ def build_search_table(postgres_config: dict) -> None:
             build_name = f"{index['name']}{BUILD_SUFFIX}"
             start = time.time()
             cur.execute(
-                f'CREATE INDEX "{build_name}" ON public."{build_table}" {index["sql"]};'
+                f'CREATE INDEX "{build_name}" ON {qualificar(build_table)} {index["sql"]};'
             )
             print_log(
                 f"  -> [{i}/{total}] ÍNDICE CRIADO: {index['name']} ({time.time() - start:.1f}s)",
                 level="docs"
             )
 
-        cur.execute(f'ANALYZE public."{build_table}";')
+        cur.execute(f'ANALYZE {qualificar(build_table)};')
 
         # 4. Atomic swap: readers never see an intermediate state
         conn.autocommit = False
-        cur.execute(f'DROP TABLE IF EXISTS public."{SEARCH_TABLE}";')
-        cur.execute(f'ALTER TABLE public."{build_table}" RENAME TO "{SEARCH_TABLE}";')
+        cur.execute(f'DROP TABLE IF EXISTS {qualificar(SEARCH_TABLE)};')
+        cur.execute(f'ALTER TABLE {qualificar(build_table)} RENAME TO "{SEARCH_TABLE}";')
         cur.execute(
-            f'ALTER TABLE public."{SEARCH_TABLE}" RENAME CONSTRAINT '
+            f'ALTER TABLE {qualificar(SEARCH_TABLE)} RENAME CONSTRAINT '
             f'"{_pk_name(build_table)}" TO "{_pk_name(SEARCH_TABLE)}";'
         )
         for index in SEARCH_TABLE_INDEXES:
-            cur.execute(f'ALTER INDEX public."{index["name"]}{BUILD_SUFFIX}" RENAME TO "{index["name"]}";')
+            cur.execute(
+                f'ALTER INDEX {qualificar(index["name"] + BUILD_SUFFIX)} '
+                f'RENAME TO "{index["name"]}";'
+            )
         conn.commit()
         conn.autocommit = True
 
