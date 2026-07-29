@@ -10,7 +10,7 @@ Fonte: [Dados Abertos CNPJ - Receita Federal](https://dados.gov.br/dados/conjunt
 
 > **Implantando do zero?** Este repositório é a etapa 5 de uma sequência que
 > atravessa quatro repositórios. A ordem está no
-> [runbook de implantação](../../docs/roadmap/20-arquitetura-de-busca-2026-07/IMPLANTACAO.md).
+> [runbook de implantação](https://github.com/BrasilDataHub/docs/blob/main/roadmap/20-arquitetura-de-busca-2026-07/IMPLANTACAO.md).
 
 ## Finalidade
 
